@@ -35,6 +35,7 @@ class RenderJob:
     width: int
     height: int
     fps: float
+    duration_sec: float
     frame_start: int
     frame_end: int
 
@@ -56,6 +57,7 @@ class RenderJob:
 
     # audio
     audio_path: Optional[Path]
+    audio_mode: str
     audio_fps: float
     audio_meta: Optional[AudioMeta]
 

@@ -29,12 +29,12 @@ Stereo is handled via `_render_view`.
 - Views are stitched (SBS or TB) before saving.
 
 
-While the CLI currently defaults to a single "Image" pass, the internal data model (`MultipassGraphConfig` in `cedartoy.types`) supports arbitrary directed acyclic graphs (DAGs) of render passes.
+The CLI supports Shadertoy‑style multipass graphs via `multipass.buffers` in YAML/JSON.
 
-To extend this:
-1. Modify `cedartoy.config` to parse a list of passes from YAML.
-2. Update `cedartoy.render` to handle texture dependencies (ping-pong buffers) if feedback is required.
-   - *Current Status*: The renderer executes passes in order but clears FBOs every frame. Implementing `read/write` feedback requires adding a texture swap logic (ping-pong) for buffers that reference themselves.
+- If `multipass.execution_order` is omitted, CedarToy topologically sorts buffers based on `channels` dependencies.
+- Exactly one buffer must set `outputs_to_screen: true`, and it must be last in the execution order.
+- Feedback/self‑references are not supported yet; adding ping‑pong textures is the next step for true Shadertoy feedback buffers.
+- The renderer binds `iChannel0..3` per buffer using `BufferConfig.channels`, supporting buffer‑to‑buffer inputs, `"audio"`, `"history"`, and `"file:<path>"` image textures.
 
 ## Adding New Features
 

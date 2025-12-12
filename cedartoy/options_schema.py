@@ -4,11 +4,22 @@ from typing import Any, List, Optional, Callable
 # EXR Gating Check
 def _check_exr_available() -> bool:
     try:
-        import imageio.v3 as iio
-        # We could try a dummy write, but import success is usually enough for the wizard check
-        return True
-    except ImportError:
-        return False
+        import numpy as _np
+        import imageio.v3 as _iio
+        import os as _os
+        import tempfile as _tempfile
+        tmp_path = None
+        try:
+            with _tempfile.NamedTemporaryFile(suffix=".exr", delete=False) as tmp:
+                tmp_path = tmp.name
+            _iio.imwrite(tmp_path, _np.zeros((2, 2, 3), dtype=_np.float32))
+            return True
+        finally:
+            if tmp_path:
+                try:
+                    _os.remove(tmp_path)
+                except OSError:
+                    pass
     except Exception:
         return False
 

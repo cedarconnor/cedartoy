@@ -5,16 +5,23 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 import math
 from dataclasses import asdict
+from datetime import datetime
 
 from .types import RenderJob, BufferConfig, MultipassGraphConfig
 from .shader import load_shader_from_file
 from .audio import AudioProcessor
 from .naming import resolve_output_path
+from .options_schema import EXR_AVAILABLE
 
 try:
     import imageio.v3 as iio
 except ImportError:
     iio = None
+
+try:
+    from scipy.ndimage import zoom as nd_zoom
+except Exception:
+    nd_zoom = None
 
 # --- Temporal Sampling ---
 def _hash_u32(x: int) -> int:
@@ -43,25 +50,46 @@ def build_basis(forward: np.ndarray, up: np.ndarray) -> np.ndarray:
 class Renderer:
     def __init__(self, job: RenderJob):
         self.job = job
+        self.output_width = job.width
+        self.output_height = job.height
+        scale = float(job.ss_scale) if job.ss_scale else 1.0
+        if scale <= 0:
+            scale = 1.0
+        self.ss_scale = scale
+        self.internal_width = max(1, int(round(self.output_width * scale)))
+        self.internal_height = max(1, int(round(self.output_height * scale)))
         self.ctx = moderngl.create_context(standalone=True)
+
+        # Feedback buffers (self-referencing channels) use ping-pong textures.
+        self.feedback_pairs: Dict[str, Dict[str, Any]] = {}
+        for name, buf in job.multipass_graph.buffers.items():
+            if buf.outputs_to_screen:
+                continue
+            if any(str(src) == name for src in (buf.channels or {}).values()):
+                self.feedback_pairs[name] = {"index": 0}
+
+        if self.feedback_pairs and job.camera_stereo != "none":
+            raise ValueError("Feedback buffers are not supported with stereo rendering yet.")
         
         # Audio
         self.audio = None
+        self.history_tex = None
         if job.audio_path:
             self.audio = AudioProcessor(job.audio_path, job.audio_fps)
-            self.history_tex_data = self.audio.get_history_texture()
-            self.history_tex = self.ctx.texture(
-                (self.history_tex_data.shape[1], self.history_tex_data.shape[0]),
-                1,
-                data=self.history_tex_data.tobytes(),
-                dtype='f4'
-            )
-        else:
-            self.history_tex = None
+            if job.audio_mode in ("history", "both"):
+                history_tex_data = self.audio.get_history_texture()
+                self.history_tex = self.ctx.texture(
+                    (history_tex_data.shape[1], history_tex_data.shape[0]),
+                    1,
+                    data=history_tex_data.tobytes(),
+                    dtype='f4'
+                )
 
         self.programs = {} 
         self.textures = {} 
         self.fbos = {}     
+        self.vaos = {}
+        self.file_textures: Dict[Path, moderngl.Texture] = {}
         # Store tile FBOs separately
         self.tile_fbos = {} # buf_name -> FBO (if using tiling)
         
@@ -84,8 +112,8 @@ class Renderer:
         tiles_x = self.job.tiles_x
         tiles_y = self.job.tiles_y
         
-        self.tile_w = math.ceil(self.job.width / tiles_x)
-        self.tile_h = math.ceil(self.job.height / tiles_y)
+        self.tile_w = math.ceil(self.internal_width / tiles_x)
+        self.tile_h = math.ceil(self.internal_height / tiles_y)
         
         for name, buf in self.job.multipass_graph.buffers.items():
             # 1. Compile Shader
@@ -110,14 +138,27 @@ class Renderer:
                 raise e
             
             self.programs[name] = prog
+
+            # Cache a fullscreen quad VAO per program.
+            fmt_parts = []
+            attrs = []
+            if 'in_vert' in prog:
+                fmt_parts.append('2f')
+                attrs.append('in_vert')
+            else:
+                fmt_parts.append('2x')
+            if 'in_uv' in prog:
+                fmt_parts.append('2f')
+                attrs.append('in_uv')
+            else:
+                fmt_parts.append('2x')
+            fmt = ' '.join(fmt_parts)
+            self.vaos[name] = self.ctx.vertex_array(prog, [(self.vbo, fmt, *attrs)])
             
             # 2. Allocate Texture
-            # Standard texture (Full Res) for dependency passes
-            dtype = 'f1'
-            if buf.bit_depth == "16f": dtype = 'f2'
-            elif buf.bit_depth == "32f": dtype = 'f4'
-            elif self.job.default_bit_depth == "16f": dtype = 'f2'
-            elif self.job.default_bit_depth == "32f": dtype = 'f4'
+            # Internal rendering uses float textures (16f or 32f). 8-bit is a disk output choice.
+            internal_bit_depth = buf.bit_depth or self.job.default_bit_depth
+            dtype = 'f4' if internal_bit_depth == "32f" else 'f2'
             
             # If this is the output pass AND we are tiling, we allocate a Small texture for tile rendering
             # BUT we also allocate the Full texture? 
@@ -129,18 +170,48 @@ class Renderer:
             # We will always allocate full texture for intermediate buffers.
             # For screen output buffer, if tiling, we allocate TILE size.
             
-            width = self.job.width
-            height = self.job.height
+            width = self.internal_width
+            height = self.internal_height
             
             if buf.outputs_to_screen and (tiles_x > 1 or tiles_y > 1):
                 width = self.tile_w
                 height = self.tile_h
                 print(f"Allocating TILE buffer for {name}: {width}x{height}")
             
-            tex = self.ctx.texture((width, height), 4, dtype=dtype)
-            self.textures[name] = tex
-            fbo = self.ctx.framebuffer(color_attachments=[tex])
-            self.fbos[name] = fbo
+            if name in self.feedback_pairs:
+                # Ping-pong pair at full internal res (feedback buffers are never tiled).
+                tex_a = self.ctx.texture((self.internal_width, self.internal_height), 4, dtype=dtype)
+                tex_b = self.ctx.texture((self.internal_width, self.internal_height), 4, dtype=dtype)
+                fbo_a = self.ctx.framebuffer(color_attachments=[tex_a])
+                fbo_b = self.ctx.framebuffer(color_attachments=[tex_b])
+                fbo_a.use(); self.ctx.clear()
+                fbo_b.use(); self.ctx.clear()
+                self.feedback_pairs[name].update({"textures": [tex_a, tex_b], "fbos": [fbo_a, fbo_b]})
+                # Default to A as current write target; will be set per-frame in _begin_frame.
+                self.textures[name] = tex_a
+                self.fbos[name] = fbo_a
+            else:
+                tex = self.ctx.texture((width, height), 4, dtype=dtype)
+                self.textures[name] = tex
+                fbo = self.ctx.framebuffer(color_attachments=[tex])
+                self.fbos[name] = fbo
+
+    def _begin_frame(self):
+        # Establish read/write targets for feedback buffers and expose current write texture.
+        for name, pair in self.feedback_pairs.items():
+            idx = int(pair["index"])
+            prev_tex = pair["textures"][idx]
+            write_tex = pair["textures"][1 - idx]
+            write_fbo = pair["fbos"][1 - idx]
+            pair["prev_tex"] = prev_tex
+            pair["write_tex"] = write_tex
+            pair["write_fbo"] = write_fbo
+            self.textures[name] = write_tex
+            self.fbos[name] = write_fbo
+
+    def _end_frame(self):
+        for pair in self.feedback_pairs.values():
+            pair["index"] = 1 - int(pair["index"])
 
     def _bind_uniforms(self, prog, uniforms: Dict[str, Any]):
         for k, v in uniforms.items():
@@ -150,11 +221,45 @@ class Renderer:
                 except Exception as e:
                     pass
 
+    def _get_file_texture(self, path: Path) -> moderngl.Texture:
+        if path in self.file_textures:
+            return self.file_textures[path]
+        if iio is None:
+            raise RuntimeError("imageio is required to load file textures.")
+        if not path.exists():
+            raise FileNotFoundError(f"Texture file not found: {path}")
+
+        img = iio.imread(path)
+        if img.ndim == 2:
+            img = np.stack([img] * 3, axis=-1)
+        if img.shape[-1] == 3:
+            alpha = np.ones((img.shape[0], img.shape[1], 1), dtype=img.dtype)
+            img = np.concatenate([img, alpha], axis=-1)
+        img = np.flipud(img)
+
+        if img.dtype.kind in ("u", "i"):
+            img_f = img.astype(np.float32) / 255.0
+        else:
+            img_f = img.astype(np.float32)
+            img_f = np.clip(img_f, 0.0, 1.0)
+
+        tex = self.ctx.texture((img_f.shape[1], img_f.shape[0]), img_f.shape[-1], data=img_f.tobytes(), dtype="f4")
+        tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        tex.repeat_x = True
+        tex.repeat_y = True
+        self.file_textures[path] = tex
+        return tex
+
     def render(self):
         start = self.job.frame_start
         end = self.job.frame_end
-        if end == 0 and self.job.fps > 0:
-            end = int(self.job.audio_meta.duration_sec * self.job.fps) if self.job.audio_meta else int(10.0 * self.job.fps)
+        if end <= start and self.job.fps > 0:
+            duration = self.job.duration_sec
+            if (duration is None or duration <= 0) and self.audio:
+                duration = self.audio.meta.duration_sec
+            if duration is None or duration <= 0:
+                duration = 0.0
+            end = start + int(round(duration * self.job.fps))
 
         out_path = Path(self.job.output_dir)
         out_path.mkdir(parents=True, exist_ok=True)
@@ -166,33 +271,46 @@ class Renderer:
 
     def render_frame(self, frame_idx: int, out_dir: Path):
         mode = self.job.camera_stereo
+
+        final_buf_name = next(name for name, b in self.job.multipass_graph.buffers.items() if b.outputs_to_screen)
+        final_conf = self.job.multipass_graph.buffers[final_buf_name]
+        buf_fmt = final_conf.output_format
+        fmt = buf_fmt if buf_fmt else self.job.default_output_format
+        buf_bit_depth = final_conf.bit_depth if final_conf.bit_depth else self.job.default_bit_depth
+
+        if iio is None:
+            raise RuntimeError("imageio is required to write output frames.")
+        if fmt == "exr" and not EXR_AVAILABLE:
+            raise RuntimeError("EXR output requested but EXR support is not available in this environment.")
+
+        if self.feedback_pairs:
+            self._begin_frame()
         
         # Render Logic
         if mode == 'none':
-            img_data = self._render_view(frame_idx, eye='center')
+            img_data = self._render_view(frame_idx, eye='center', out_format=fmt, out_bit_depth=buf_bit_depth)
         else:
-            left = self._render_view(frame_idx, eye='left')
-            right = self._render_view(frame_idx, eye='right')
+            left = self._render_view(frame_idx, eye='left', out_format=fmt, out_bit_depth=buf_bit_depth)
+            right = self._render_view(frame_idx, eye='right', out_format=fmt, out_bit_depth=buf_bit_depth)
             if mode == 'sbs':
                 img_data = np.concatenate([left, right], axis=1)
             elif mode == 'tb':
                 img_data = np.concatenate([left, right], axis=0)
             else:
                 img_data = left
-                
-        final_buf_name = next(name for name, b in self.job.multipass_graph.buffers.items() if b.outputs_to_screen)
-        buf_fmt = self.job.multipass_graph.buffers[final_buf_name].output_format
-        fmt = buf_fmt if buf_fmt else self.job.default_output_format
 
         out_file = resolve_output_path(out_dir, self.job.output_pattern, frame_idx, fmt)
         iio.imwrite(out_file, img_data)
         
         print(f"Frame {frame_idx} saved to {out_file.name}")
 
-    def _render_view(self, frame_idx: int, eye: str) -> np.ndarray:
+        if self.feedback_pairs:
+            self._end_frame()
+
+    def _render_view(self, frame_idx: int, eye: str, out_format: str, out_bit_depth: str) -> np.ndarray:
         # Accumulation Buffer (CPU, Full Res)
         # We accumulate directly into this.
-        acc_buffer = np.zeros((self.job.height, self.job.width, 4), dtype=np.float32)
+        acc_buffer = np.zeros((self.internal_height, self.internal_width, 4), dtype=np.float32)
             
         offsets = temporal_offsets(self.job.temporal_samples, frame_idx)
         base_time = frame_idx / self.job.fps
@@ -242,14 +360,10 @@ class Renderer:
                     tex = self.textures[final_buf_name]
                     raw_bytes = tex.read()
                     
-                    # Determine dtype logic (duped from before)
                     buf_conf = self.job.multipass_graph.buffers[final_buf_name]
-                    dtype = 'f1'
-                    if buf_conf.bit_depth == "16f": dtype = 'f2'
-                    elif buf_conf.bit_depth == "32f": dtype = 'f4'
-                    elif self.job.default_bit_depth == "16f": dtype = 'f2'
-                    elif self.job.default_bit_depth == "32f": dtype = 'f4'
-                    numpy_dtype = np.float32 if dtype == 'f4' else (np.float16 if dtype == 'f2' else np.uint8)
+                    internal_bit_depth = buf_conf.bit_depth or self.job.default_bit_depth
+                    dtype = 'f4' if internal_bit_depth == "32f" else 'f2'
+                    numpy_dtype = np.float32 if dtype == 'f4' else np.float16
                     
                     tile_data = np.frombuffer(raw_bytes, dtype=numpy_dtype).reshape((self.tile_h, self.tile_w, 4))
                     tile_data = np.flipud(tile_data) 
@@ -279,16 +393,16 @@ class Renderer:
                     y_end_gl = off_y + self.tile_h
                     
                     # Clip to image bounds
-                    y_start_gl = max(0, min(self.job.height, y_start_gl))
-                    y_end_gl = max(0, min(self.job.height, y_end_gl))
+                    y_start_gl = max(0, min(self.internal_height, y_start_gl))
+                    y_end_gl = max(0, min(self.internal_height, y_end_gl))
                     
                     valid_h = y_end_gl - y_start_gl
                     if valid_h <= 0: continue
                     
                     x_start = off_x
                     x_end = off_x + self.tile_w
-                    x_start = max(0, min(self.job.width, x_start))
-                    x_end = max(0, min(self.job.width, x_end))
+                    x_start = max(0, min(self.internal_width, x_start))
+                    x_end = max(0, min(self.internal_width, x_end))
                     
                     valid_w = x_end - x_start
                     if valid_w <= 0: continue
@@ -297,8 +411,8 @@ class Renderer:
                     # GL Y=0 -> Numpy Y=H
                     # GL Y=H -> Numpy Y=0
                     # range [y_start_gl, y_end_gl] -> [H - y_end_gl, H - y_start_gl]
-                    ny_start = self.job.height - y_end_gl
-                    ny_end = self.job.height - y_start_gl
+                    ny_start = self.internal_height - y_end_gl
+                    ny_end = self.internal_height - y_start_gl
                     
                     # Extract valid region from rendered tile
                     # Tile was rendered full size (self.tile_h, self.tile_w).
@@ -349,13 +463,25 @@ class Renderer:
 
         # Average Accumulation
         avg = acc_buffer / self.job.temporal_samples
+
+        # Spatial supersampling downsample to output resolution
+        if self.internal_width != self.output_width or self.internal_height != self.output_height:
+            if nd_zoom is None:
+                avg = avg[:: max(1, int(round(self.internal_height / self.output_height))),
+                          :: max(1, int(round(self.internal_width / self.output_width))), :]
+            else:
+                zoom_y = self.output_height / self.internal_height
+                zoom_x = self.output_width / self.internal_width
+                avg = nd_zoom(avg, (zoom_y, zoom_x, 1.0), order=1)
+            avg = avg[: self.output_height, : self.output_width, :]
         
-        # Tone Map / Convert
-        if numpy_dtype == np.uint8:
-            return avg.astype(np.uint8)
-        else:
-            avg = np.clip(avg, 0.0, 1.0) * 255.0
-            return avg.astype(np.uint8)
+        # Output conversion
+        if out_format == "exr":
+            if out_bit_depth == "16f":
+                return avg.astype(np.float16)
+            return avg.astype(np.float32)
+        avg = np.clip(avg, 0.0, 1.0) * 255.0
+        return avg.astype(np.uint8)
             
     def _render_pass(self, buf_name: str, time_val: float, frame_idx: int, sample_idx: int, 
                      cam_pos: np.ndarray, cam_dir: np.ndarray, cam_up: np.ndarray,
@@ -370,10 +496,13 @@ class Renderer:
         # Uniforms
         uni = {
             'iTime': time_val,
+            'iTimeDelta': (1.0 / self.job.fps) if self.job.fps > 0 else 0.0,
+            'iFrameRate': float(self.job.fps),
             'iFrame': frame_idx,
-            'iResolution': (self.job.width, self.job.height, 1.0),
-            'iPassIndex': 0, 
+            'iResolution': (self.internal_width, self.internal_height, 1.0),
+            'iPassIndex': self.job.multipass_graph.execution_order.index(buf_name),
             'iTileOffset': tile_offset,
+            'iMouse': self.job.iMouse,
             # Camera
             'iCameraMode': ['2d', 'equirect', 'll180'].index(self.job.camera_mode),
             'iCameraStereo': ['none', 'sbs', 'tb'].index(self.job.camera_stereo),
@@ -384,36 +513,94 @@ class Renderer:
             'iCameraDir': tuple(cam_dir),
             'iCameraUp': tuple(cam_up),
         }
-        
-        # Bind Audio
+
+        # Standard Shadertoy time/date uniforms
+        now = datetime.now()
+        seconds_of_day = now.hour * 3600 + now.minute * 60 + now.second + now.microsecond / 1e6
+        uni['iDate'] = (now.year, now.month, now.day, seconds_of_day)
+
+        duration_uniform = self.job.duration_sec
+        if (duration_uniform is None or duration_uniform <= 0) and self.audio:
+            duration_uniform = self.audio.meta.duration_sec
+        uni['iDuration'] = float(duration_uniform or 0.0)
+
+        # iChannelTime / iChannelResolution
+        ch_time = [0.0, 0.0, 0.0, 0.0]
+        ch_res = [(0.0, 0.0, 0.0)] * 4
+
         if self.audio:
-            aud_data = self.audio.get_shadertoy_texture(frame_idx) 
-            if not hasattr(self, 'audio_tex_512'):
-                self.audio_tex_512 = self.ctx.texture((512, 2), 1, dtype='f4')
-            self.audio_tex_512.write(aud_data.astype('f4').tobytes())
-            self.audio_tex_512.use(location=0) 
+            uni['iSampleRate'] = float(self.audio.meta.sample_rate)
+            if self.job.audio_mode in ("shadertoy", "both"):
+                aud_data = self.audio.get_shadertoy_texture(frame_idx)
+                if not hasattr(self, 'audio_tex_512'):
+                    self.audio_tex_512 = self.ctx.texture((512, 2), 1, dtype='f4')
+                self.audio_tex_512.write(aud_data.astype('f4').tobytes())
+        else:
+            uni['iSampleRate'] = 0.0
+
+        if self.history_tex:
+            self.history_tex.use(location=4)
+            uni['iAudioHistoryTex'] = 4
+            uni['iAudioHistoryResolution'] = (self.history_tex.width, self.history_tex.height, 0)
+
+        # Default audio binding for compatibility if not overridden.
+        if self.audio and self.job.audio_mode in ("shadertoy", "both") and 0 not in (buf_conf.channels or {}):
+            self.audio_tex_512.use(location=0)
             uni['iChannel0'] = 0
-            if self.history_tex:
-                self.history_tex.use(location=4) 
-                uni['iAudioHistoryTex'] = 4
-                uni['iAudioHistoryResolution'] = (self.history_tex.width, self.history_tex.height, 0)
+            ch_time[0] = time_val
+            ch_res[0] = (512.0, 2.0, 1.0)
+
+        # Bind channels for this buffer.
+        for idx, src in (buf_conf.channels or {}).items():
+            try:
+                unit = int(idx)
+            except Exception:
+                continue
+            if unit < 0 or unit > 3:
+                continue
+            if src is None:
+                continue
+            src_str = str(src)
+            lower = src_str.lower()
+            tex_to_bind: Optional[moderngl.Texture] = None
+
+            if lower in ("audio", "shadertoy_audio"):
+                if self.audio and self.job.audio_mode in ("shadertoy", "both"):
+                    tex_to_bind = self.audio_tex_512
+                    ch_res[unit] = (512.0, 2.0, 1.0)
+                    ch_time[unit] = time_val
+            elif lower in ("history", "audiohistory", "audio_history"):
+                if self.history_tex:
+                    tex_to_bind = self.history_tex
+                    ch_res[unit] = (float(self.history_tex.width), float(self.history_tex.height), 1.0)
+                    ch_time[unit] = time_val
+            elif src_str == buf_name and buf_name in self.feedback_pairs:
+                tex_to_bind = self.feedback_pairs[buf_name]["prev_tex"]
+                ch_res[unit] = (float(tex_to_bind.width), float(tex_to_bind.height), 1.0)
+                ch_time[unit] = time_val
+            elif src_str.startswith("file:"):
+                file_path = Path(src_str[5:]).expanduser()
+                tex_to_bind = self._get_file_texture(file_path)
+                ch_res[unit] = (float(tex_to_bind.width), float(tex_to_bind.height), 1.0)
+                ch_time[unit] = 0.0
+            elif src_str in self.textures:
+                dep_tex = self.textures[src_str]
+                tex_to_bind = dep_tex
+                ch_res[unit] = (float(dep_tex.width), float(dep_tex.height), 1.0)
+                ch_time[unit] = time_val
+            else:
+                maybe_path = Path(src_str).expanduser()
+                if maybe_path.exists():
+                    tex_to_bind = self._get_file_texture(maybe_path)
+                    ch_res[unit] = (float(tex_to_bind.width), float(tex_to_bind.height), 1.0)
+
+            if tex_to_bind is not None:
+                tex_to_bind.use(location=unit)
+                uni[f'iChannel{unit}'] = unit
+
+        uni['iChannelTime'] = tuple(ch_time)
+        uni['iChannelResolution'] = tuple(v for triple in ch_res for v in triple)
 
         self._bind_uniforms(prog, uni)
         
-        fmt_parts = []
-        attrs = []
-        if 'in_vert' in prog:
-            fmt_parts.append('2f')
-            attrs.append('in_vert')
-        else:
-            fmt_parts.append('2x')
-        if 'in_uv' in prog:
-            fmt_parts.append('2f')
-            attrs.append('in_uv')
-        else:
-            fmt_parts.append('2x')
-        fmt = ' '.join(fmt_parts)
-        
-        vao = self.ctx.vertex_array(prog, [(self.vbo, fmt, *attrs)])
-        vao.render(moderngl.TRIANGLE_STRIP)
-        vao.release()
+        self.vaos[buf_name].render(moderngl.TRIANGLE_STRIP)

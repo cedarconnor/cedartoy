@@ -16,6 +16,27 @@
     <h1>CedarToy Preview</h1>
     <canvas id="glcanvas" width="800" height="450"></canvas>
     <div class="controls">
+        <select id="shaderSelect"></select>
+        <label>
+            iChannel0 Image
+            <input id="chan0" type="file" accept="image/*">
+        </label>
+        <label>
+            iChannel1 Image
+            <input id="chan1" type="file" accept="image/*">
+        </label>
+        <label>
+            iChannel2 Image
+            <input id="chan2" type="file" accept="image/*">
+        </label>
+        <label>
+            iChannel3 Image
+            <input id="chan3" type="file" accept="image/*">
+        </label>
+        <label>
+            Audio (binds to iChannel0 if no image)
+            <input id="audioFile" type="file" accept="audio/*">
+        </label>
         <button id="reload">Reload Shaders</button>
         <span id="status">Ready</span>
     </div>

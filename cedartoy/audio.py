@@ -88,13 +88,17 @@ class AudioProcessor:
         fft_res = np.fft.rfft(chunk * window)
         fft_mag = np.abs(fft_res)
         
-        waveform = chunk 
+        waveform = np.clip(chunk, -1.0, 1.0)
         waveform = (waveform * 0.5) + 0.5
         
         out = np.zeros((2, 512), dtype=np.float32)
         
-        out[0, :] = fft_mag[:512] 
-        out[0, :] /= 512.0 
+        fft_bins = fft_mag[:512]
+        fft_bins = np.log1p(fft_bins)
+        max_val = float(np.max(fft_bins)) if fft_bins.size else 0.0
+        if max_val > 0:
+            fft_bins = fft_bins / max_val
+        out[0, :] = np.clip(fft_bins, 0.0, 1.0)
         
         out[1, :] = waveform[::2][:512]
         
@@ -111,7 +115,12 @@ class AudioProcessor:
         tex = np.zeros((bins * channels, frames), dtype=np.float32)
         
         nperseg = 1024
-        hop = int(self.data.sample_rate / self.fps)
+        if self.fps > 0:
+            hop = max(1, int(self.data.sample_rate / self.fps))
+        else:
+            hop = nperseg // 2
+        hop = min(hop, nperseg - 1)
+        noverlap = nperseg - hop
         
         for ch in range(channels):
             # FIX: use 'hann'
@@ -120,7 +129,7 @@ class AudioProcessor:
                 fs=self.data.sample_rate, 
                 window='hann', 
                 nperseg=nperseg, 
-                noverlap=nperseg-hop, 
+                noverlap=noverlap, 
                 mode='magnitude'
             )
             

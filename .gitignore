@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.Python
+.env
+.venv/
+venv/
+ENV/
+
+# Build / render outputs
+renders/
+test_output/
+final_check*/
+audio_data/
+audio_output/
+
+# Editor/OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

@@ -10,7 +10,7 @@ The primary entry point is `python -m cedartoy.cli`.
 Renders a shader sequence.
 
 **Arguments:**
-- `shader` (positional): Path to the GLSL shader file.
+- `shader` (positional, required unless in config): Path to the GLSL shader file.
 - `--config`: Path to a YAML/JSON configuration file.
 - `--output-dir`: Directory to save frames (default: `renders`).
 - `--output-pattern`: Naming pattern (default: `frame_{frame:05d}.{ext}`).
@@ -45,6 +45,8 @@ width: 3840
 height: 2160
 fps: 60
 duration_sec: 10.0
+# If frame_end is 0, it is derived from duration_sec * fps.
+# Set duration_sec: 0 to use audio length when audio_path is set.
 
 # Quality
 ss_scale: 1.0          # Spatial supersampling
@@ -61,6 +63,67 @@ audio_mode: "both"     # "shadertoy", "history", or "both"
 ```
 
 ---
+
+## Quality Options
+
+### Spatial Supersampling (`ss_scale`)
+
+`ss_scale` renders internally at `ss_scale × width/height` and downsamples to the configured output size.
+
+- Use `1.0` for no spatial SS.
+- Use `2.0` (or higher) for smoother antialiasing on hard edges / raymarching.
+- With `ss_scale > 1`, `iResolution` in shaders reflects the internal supersampled resolution.
+
+### Temporal Supersampling (`temporal_samples` / `shutter`)
+
+- `temporal_samples: 1` disables motion blur.
+- Higher values jitter time within the frame deterministically and average samples.
+- `shutter` is the fraction of a frame the shutter is open (0–1).
+
+---
+
+## Multipass Rendering
+
+To define Shadertoy‑style buffers, add a `multipass` section.
+
+Rules:
+- Exactly one buffer must set `outputs_to_screen: true`, and it must be last.
+- Feedback/self‑references (a buffer sampling itself) are not supported yet.
+- `channels` values may be:
+  - another buffer name (`"A"`, `"B"`, ...)
+  - `"audio"` (Shadertoy 512×2 audio texture, if enabled)
+  - `"history"` (audio history texture, if enabled)
+  - `"file:<path>"` or a plain file path to an image
+
+Example:
+
+```yaml
+shader: shaders/test.glsl  # default shader if Image omits it
+multipass:
+  buffers:
+    A:
+      shader: shaders/bufA.glsl
+      channels: {0: "file:textures/noise.png"}
+      bit_depth: "32f"
+    Image:
+      shader: shaders/image.glsl
+      outputs_to_screen: true
+      channels: {0: "A", 1: "audio"}
+  # execution_order is optional; if omitted, CedarToy topologically sorts buffers.
+  # execution_order: ["A", "Image"]
+```
+
+---
+
+## Web Preview
+
+Run:
+
+```bash
+python -m cedartoy.cli serve --port 8000
+```
+
+Then open `http://localhost:8000/` in a browser. The preview loads shaders from `/api/shader`, recompiles on selection or “Reload Shaders”, and provides basic Shadertoy uniforms (`iTime`, `iResolution`, `iMouse`, etc.). Audio and file textures are currently shown as black in the browser preview.
 
 ## Camera Modes
 
