@@ -146,14 +146,17 @@ class Renderer:
                 fmt_parts.append('2f')
                 attrs.append('in_vert')
             else:
-                fmt_parts.append('2x')
+                fmt_parts.append('8x')
             if 'in_uv' in prog:
                 fmt_parts.append('2f')
                 attrs.append('in_uv')
             else:
-                fmt_parts.append('2x')
+                fmt_parts.append('8x')
+            # print(f"DEBUG: Program members: {list(prog)}")
             fmt = ' '.join(fmt_parts)
+            # print(f"DEBUG: Buffer {name} - Format: {fmt}, Attrs: {attrs}")
             self.vaos[name] = self.ctx.vertex_array(prog, [(self.vbo, fmt, *attrs)])
+            
             
             # 2. Allocate Texture
             # Internal rendering uses float textures (16f or 32f). 8-bit is a disk output choice.
