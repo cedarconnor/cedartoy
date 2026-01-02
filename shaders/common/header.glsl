@@ -20,6 +20,8 @@ uniform float     iSampleRate;           // sound sample rate (i.e., 44100)
 uniform float     iDuration;             // total duration of the animation
 uniform int       iPassIndex;            // index of the current pass
 uniform vec2      iTileOffset;           // offset for tiled rendering
+uniform vec2      iJitter;               // subpixel jitter for AA (Halton sequence)
+uniform int       iSampleIndex;          // current temporal/AA sample index
 
 // Camera / VR
 uniform int       iCameraMode;           // 0=2D, 1=Equirect, 2=LL180

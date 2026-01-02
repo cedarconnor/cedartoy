@@ -1,6 +1,9 @@
 import moderngl
 import numpy as np
 import os
+import json
+import sys
+import time
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 import math
@@ -23,6 +26,32 @@ try:
 except Exception:
     nd_zoom = None
 
+# --- Progress Logging for UI ---
+def log_progress(frame, total, elapsed_sec):
+    """Output structured progress for UI"""
+    progress = {
+        "frame": frame,
+        "total": total,
+        "elapsed_sec": round(elapsed_sec, 2)
+    }
+    print(f"[PROGRESS] {json.dumps(progress)}", file=sys.stderr, flush=True)
+
+def log_info(message):
+    """Output info log"""
+    print(f"[LOG] INFO: {message}", file=sys.stderr, flush=True)
+
+def log_error(message, details=None):
+    """Output error log"""
+    error_data = {"message": message}
+    if details:
+        error_data["details"] = details
+    print(f"[ERROR] {json.dumps(error_data)}", file=sys.stderr, flush=True)
+
+def log_complete(output_dir, frames):
+    """Output completion message"""
+    complete_data = {"output_dir": str(output_dir), "frames": frames}
+    print(f"[COMPLETE] {json.dumps(complete_data)}", file=sys.stderr, flush=True)
+
 # --- Temporal Sampling ---
 def _hash_u32(x: int) -> int:
     x = (x + 0x9E3779B9) & 0xFFFFFFFF
@@ -40,6 +69,34 @@ def temporal_offsets(num_samples: int, frame_index: int) -> List[float]:
         offsets.append(max(0.0, min(1.0, base + jitter)))
     return offsets
 
+# --- Halton Sequence for Subpixel Jitter ---
+def halton(index: int, base: int) -> float:
+    """Generate element of Halton sequence (low-discrepancy sequence for AA)"""
+    result = 0.0
+    f = 1.0
+    i = index
+    while i > 0:
+        f = f / base
+        result = result + f * (i % base)
+        i = i // base
+    return result
+
+def halton_2d(index: int) -> Tuple[float, float]:
+    """Generate 2D Halton point using bases 2 and 3"""
+    return (halton(index + 1, 2), halton(index + 1, 3))
+
+def subpixel_jitter(sample_index: int, frame_index: int, num_samples: int) -> Tuple[float, float]:
+    """
+    Generate subpixel jitter offset for antialiasing.
+    Returns offset in range [-0.5, 0.5] for both x and y.
+    Uses Halton sequence for low-discrepancy sampling.
+    """
+    # Use combined index for deterministic but varied samples per frame
+    combined_index = frame_index * num_samples + sample_index
+    hx, hy = halton_2d(combined_index)
+    # Map from [0,1] to [-0.5, 0.5] for centered jitter
+    return (hx - 0.5, hy - 0.5)
+
 def build_basis(forward: np.ndarray, up: np.ndarray) -> np.ndarray:
     f = forward / np.linalg.norm(forward)
     r = np.cross(up, f)
@@ -52,12 +109,21 @@ class Renderer:
         self.job = job
         self.output_width = job.width
         self.output_height = job.height
+
+        # Validate dimensions
+        if self.output_width <= 0 or self.output_height <= 0:
+            raise ValueError(f"Invalid dimensions: {self.output_width}x{self.output_height}")
+
         scale = float(job.ss_scale) if job.ss_scale else 1.0
         if scale <= 0:
             scale = 1.0
         self.ss_scale = scale
         self.internal_width = max(1, int(round(self.output_width * scale)))
         self.internal_height = max(1, int(round(self.output_height * scale)))
+
+        print(f"[LOG] Renderer init: output={self.output_width}x{self.output_height}, internal={self.internal_width}x{self.internal_height}, ss_scale={scale}")
+        print(f"[LOG] Job params: tiles={job.tiles_x}x{job.tiles_y}, temporal_samples={job.temporal_samples}, bit_depth={job.default_bit_depth}")
+
         self.ctx = moderngl.create_context(standalone=True)
 
         # Feedback buffers (self-referencing channels) use ping-pong textures.
@@ -159,9 +225,16 @@ class Renderer:
             
             
             # 2. Allocate Texture
-            # Internal rendering uses float textures (16f or 32f). 8-bit is a disk output choice.
+            # Internal rendering uses float textures (16f or 32f). 8-bit output is converted on disk write.
             internal_bit_depth = buf.bit_depth or self.job.default_bit_depth
-            dtype = 'f4' if internal_bit_depth == "32f" else 'f2'
+            # Use float32 for 32f, float16 for 16f, and float32 for 8-bit (convert on output)
+            if internal_bit_depth == "32f":
+                dtype = 'f4'
+            elif internal_bit_depth == "16f":
+                dtype = 'f2'
+            else:
+                # For 8-bit output, still use float32 internally for quality
+                dtype = 'f4'
             
             # If this is the output pass AND we are tiling, we allocate a Small texture for tile rendering
             # BUT we also allocate the Full texture? 
@@ -180,13 +253,19 @@ class Renderer:
                 width = self.tile_w
                 height = self.tile_h
                 print(f"Allocating TILE buffer for {name}: {width}x{height}")
-            
+
+            print(f"[LOG] Creating texture for '{name}': {width}x{height}, dtype={dtype}, bit_depth={internal_bit_depth}")
+
             if name in self.feedback_pairs:
                 # Ping-pong pair at full internal res (feedback buffers are never tiled).
-                tex_a = self.ctx.texture((self.internal_width, self.internal_height), 4, dtype=dtype)
-                tex_b = self.ctx.texture((self.internal_width, self.internal_height), 4, dtype=dtype)
-                fbo_a = self.ctx.framebuffer(color_attachments=[tex_a])
-                fbo_b = self.ctx.framebuffer(color_attachments=[tex_b])
+                try:
+                    tex_a = self.ctx.texture((self.internal_width, self.internal_height), 4, dtype=dtype)
+                    tex_b = self.ctx.texture((self.internal_width, self.internal_height), 4, dtype=dtype)
+                    fbo_a = self.ctx.framebuffer(color_attachments=[tex_a])
+                    fbo_b = self.ctx.framebuffer(color_attachments=[tex_b])
+                except Exception as e:
+                    print(f"[ERROR] Failed to create feedback buffer for '{name}': {e}")
+                    raise
                 fbo_a.use(); self.ctx.clear()
                 fbo_b.use(); self.ctx.clear()
                 self.feedback_pairs[name].update({"textures": [tex_a, tex_b], "fbos": [fbo_a, fbo_b]})
@@ -194,10 +273,14 @@ class Renderer:
                 self.textures[name] = tex_a
                 self.fbos[name] = fbo_a
             else:
-                tex = self.ctx.texture((width, height), 4, dtype=dtype)
-                self.textures[name] = tex
-                fbo = self.ctx.framebuffer(color_attachments=[tex])
-                self.fbos[name] = fbo
+                try:
+                    tex = self.ctx.texture((width, height), 4, dtype=dtype)
+                    self.textures[name] = tex
+                    fbo = self.ctx.framebuffer(color_attachments=[tex])
+                    self.fbos[name] = fbo
+                except Exception as e:
+                    print(f"[ERROR] Failed to create texture/FBO for '{name}' ({width}x{height}, dtype={dtype}): {e}")
+                    raise
 
     def _begin_frame(self):
         # Establish read/write targets for feedback buffers and expose current write texture.
@@ -266,11 +349,28 @@ class Renderer:
 
         out_path = Path(self.job.output_dir)
         out_path.mkdir(parents=True, exist_ok=True)
-        
+
+        total_frames = end - start
         print(f"Rendering frames {start} to {end}...")
-        
-        for f in range(start, end):
-            self.render_frame(f, out_path)
+        log_info(f"Starting render: {total_frames} frames at {self.job.fps} fps")
+
+        start_time = time.time()
+
+        try:
+            for f in range(start, end):
+                self.render_frame(f, out_path)
+
+                # Log progress after each frame
+                elapsed = time.time() - start_time
+                log_progress(f - start + 1, total_frames, elapsed)
+
+            # Log completion
+            log_complete(out_path, total_frames)
+            log_info(f"Render complete! Output: {out_path}")
+
+        except Exception as e:
+            log_error(f"Render failed: {str(e)}", str(type(e).__name__))
+            raise
 
     def render_frame(self, frame_idx: int, out_dir: Path):
         mode = self.job.camera_stereo
@@ -365,7 +465,13 @@ class Renderer:
                     
                     buf_conf = self.job.multipass_graph.buffers[final_buf_name]
                     internal_bit_depth = buf_conf.bit_depth or self.job.default_bit_depth
-                    dtype = 'f4' if internal_bit_depth == "32f" else 'f2'
+                    # Match the texture dtype we created (8-bit uses f4 internally)
+                    if internal_bit_depth == "32f":
+                        dtype = 'f4'
+                    elif internal_bit_depth == "16f":
+                        dtype = 'f2'
+                    else:
+                        dtype = 'f4'  # 8-bit uses float32 internally
                     numpy_dtype = np.float32 if dtype == 'f4' else np.float16
                     
                     tile_data = np.frombuffer(raw_bytes, dtype=numpy_dtype).reshape((self.tile_h, self.tile_w, 4))
@@ -496,6 +602,9 @@ class Renderer:
         fbo.use()
         self.ctx.clear() 
         
+        # Compute subpixel jitter for AA (Halton sequence)
+        jitter = subpixel_jitter(sample_idx, frame_idx, self.job.temporal_samples)
+
         # Uniforms
         uni = {
             'iTime': time_val,
@@ -505,6 +614,8 @@ class Renderer:
             'iResolution': (self.internal_width, self.internal_height, 1.0),
             'iPassIndex': self.job.multipass_graph.execution_order.index(buf_name),
             'iTileOffset': tile_offset,
+            'iJitter': jitter,
+            'iSampleIndex': sample_idx,
             'iMouse': self.job.iMouse,
             # Camera
             'iCameraMode': ['2d', 'equirect', 'll180'].index(self.job.camera_mode),

@@ -3,43 +3,52 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CedarToy Preview</title>
-    <style>
-        body { background: #111; color: #eee; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-        canvas { border: 1px solid #333; max-width: 90%; max-height: 80vh; }
-        .controls { margin-top: 20px; }
-        button { padding: 10px 20px; background: #333; color: white; border: none; cursor: pointer; }
-        button:hover { background: #444; }
-    </style>
+    <title>CedarToy - Shader Renderer</title>
+    <link rel="stylesheet" href="/css/main.css">
+    <link rel="stylesheet" href="/css/components.css">
+    <!-- CodeMirror for shader editing -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/monokai.min.css">
 </head>
 <body>
-    <h1>CedarToy Preview</h1>
-    <canvas id="glcanvas" width="800" height="450"></canvas>
-    <div class="controls">
-        <select id="shaderSelect"></select>
-        <label>
-            iChannel0 Image
-            <input id="chan0" type="file" accept="image/*">
-        </label>
-        <label>
-            iChannel1 Image
-            <input id="chan1" type="file" accept="image/*">
-        </label>
-        <label>
-            iChannel2 Image
-            <input id="chan2" type="file" accept="image/*">
-        </label>
-        <label>
-            iChannel3 Image
-            <input id="chan3" type="file" accept="image/*">
-        </label>
-        <label>
-            Audio (binds to iChannel0 if no image)
-            <input id="audioFile" type="file" accept="audio/*">
-        </label>
-        <button id="reload">Reload Shaders</button>
-        <span id="status">Ready</span>
+    <div id="app">
+        <header class="app-header">
+            <h1>🌲 CedarToy</h1>
+            <nav>
+                <a href="https://github.com/yourusername/cedartoy" target="_blank">GitHub</a>
+                <a href="/docs/USER_GUIDE.md" target="_blank">Docs</a>
+            </nav>
+        </header>
+
+        <main class="app-main">
+            <aside class="shader-browser-panel">
+                <shader-browser></shader-browser>
+            </aside>
+
+            <section class="config-editor-panel">
+                <config-editor></config-editor>
+            </section>
+
+            <section class="preview-panel-wrapper">
+                <preview-panel></preview-panel>
+                <audio-viz></audio-viz>
+            </section>
+        </main>
+
+        <footer class="render-panel-wrapper">
+            <render-panel></render-panel>
+        </footer>
     </div>
-    <script src="preview.js"></script>
+
+    <!-- Hidden components -->
+    <directory-browser></directory-browser>
+    <shader-editor></shader-editor>
+
+    <!-- CodeMirror -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/clike/clike.min.js"></script>
+
+    <!-- App Scripts -->
+    <script type="module" src="/js/app.js"></script>
 </body>
 </html>

@@ -9,9 +9,10 @@ FOOTER = """
 out vec4 fragColor_out;
 void main() {
     vec4 color = vec4(0.0);
-    // Apply tile offset to fragCoord
-    // Default iTileOffset is (0,0) if not set, so this is safe.
-    mainImage(color, gl_FragCoord.xy + iTileOffset);
+    // Apply tile offset and subpixel jitter to fragCoord
+    // iTileOffset: for tiled rendering (default 0,0)
+    // iJitter: subpixel offset for AA (Halton sequence, range [-0.5, 0.5])
+    mainImage(color, gl_FragCoord.xy + iTileOffset + iJitter);
     fragColor_out = color;
 }
 """

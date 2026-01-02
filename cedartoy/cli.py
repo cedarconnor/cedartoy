@@ -1,5 +1,8 @@
 import argparse
 import sys
+import webbrowser
+import threading
+import time
 from pathlib import Path
 from collections import defaultdict, deque
 from typing import Any, Dict, List, Optional
@@ -185,6 +188,28 @@ def config_to_job(cfg: dict) -> RenderJob:
         multipass_graph=mp
     )
 
+def run_ui_server(args):
+    """Start the FastAPI web UI server"""
+    try:
+        import uvicorn
+        from cedartoy.server.app import app
+    except ImportError:
+        print("Error: FastAPI dependencies not installed. Run: pip install fastapi uvicorn[standard]")
+        sys.exit(1)
+
+    # Open browser automatically unless disabled
+    if not args.no_browser:
+        def open_browser():
+            time.sleep(1.5)  # Wait for server to start
+            webbrowser.open(f'http://localhost:{args.port}')
+
+        threading.Thread(target=open_browser, daemon=True).start()
+
+    print(f"Starting CedarToy Web UI on http://localhost:{args.port}")
+    print("Press Ctrl+C to stop")
+
+    uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="info")
+
 def main():
     parser = argparse.ArgumentParser(description="CedarToy Renderer")
     subparsers = parser.add_subparsers(dest="command")
@@ -214,6 +239,11 @@ def main():
     serve_parser = subparsers.add_parser("serve", help="Start web preview server")
     serve_parser.add_argument("--port", type=int, default=8000, help="Port to listen on")
 
+    # UI
+    ui_parser = subparsers.add_parser("ui", help="Start web UI server")
+    ui_parser.add_argument("--port", type=int, default=8080, help="Server port")
+    ui_parser.add_argument("--no-browser", action="store_true", help="Do not open browser automatically")
+
     args = parser.parse_args()
     
     if args.command == "wizard":
@@ -223,7 +253,11 @@ def main():
     if args.command == "serve":
         run_server(port=args.port)
         return
-        
+
+    if args.command == "ui":
+        run_ui_server(args)
+        return
+
     if args.command == "render":
         if not args.shader and not args.config:
             parser.error("render requires a shader path or --config with a 'shader' entry.")
