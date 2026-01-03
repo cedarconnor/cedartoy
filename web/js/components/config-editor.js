@@ -20,12 +20,18 @@ class ConfigEditor extends HTMLElement {
         const savedConfig = this.loadFromLocalStorage();
         this.config = savedConfig || defaultsData.config;
 
-        // Ensure camera_mode has a default if missing
+        // Ensure camera settings have defaults if missing
         if (!this.config.camera_mode) {
             this.config.camera_mode = '2d';
         }
-        if (!this.config.camera_params) {
-            this.config.camera_params = { tilt_deg: 0 };
+        // Ensure camera_tilt_deg exists at top level (not nested in camera_params)
+        if (this.config.camera_tilt_deg === undefined) {
+            // Try to migrate from old nested format
+            if (this.config.camera_params?.tilt_deg !== undefined) {
+                this.config.camera_tilt_deg = this.config.camera_params.tilt_deg;
+            } else {
+                this.config.camera_tilt_deg = 0;
+            }
         }
 
         this.render();
@@ -83,7 +89,7 @@ class ConfigEditor extends HTMLElement {
                     </div>
                     <div class="form-group">
                         <label class="form-label">Camera Tilt (degrees)</label>
-                        <input type="number" class="form-input" name="camera_tilt" value="${this.config.camera_params?.tilt_deg || 0}" min="0" max="90" step="1">
+                        <input type="number" class="form-input" name="camera_tilt_deg" value="${this.config.camera_tilt_deg || 0}" min="0" max="90" step="1">
                     </div>
 
                     <!-- Tiling Section -->
@@ -168,15 +174,8 @@ class ConfigEditor extends HTMLElement {
                     value = parseFloat(value);
                 }
 
-                // Special handling for camera_tilt -> camera_params.tilt_deg
-                if (name === 'camera_tilt') {
-                    if (!this.config.camera_params) {
-                        this.config.camera_params = {};
-                    }
-                    this.config.camera_params.tilt_deg = value;
-                } else {
-                    this.config[name] = value;
-                }
+                // Store directly in config (no special nested handling needed)
+                this.config[name] = value;
                 this.saveToLocalStorage();
                 this.dispatchEvent(new CustomEvent('config-change', { detail: this.config, bubbles: true }));
             });

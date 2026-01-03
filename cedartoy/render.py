@@ -121,6 +121,14 @@ class Renderer:
         self.internal_width = max(1, int(round(self.output_width * scale)))
         self.internal_height = max(1, int(round(self.output_height * scale)))
 
+        # Validate tiling and temporal samples (must be at least 1 to avoid division by zero)
+        if job.tiles_x < 1:
+            raise ValueError(f"tiles_x must be at least 1, got {job.tiles_x}")
+        if job.tiles_y < 1:
+            raise ValueError(f"tiles_y must be at least 1, got {job.tiles_y}")
+        if job.temporal_samples < 1:
+            raise ValueError(f"temporal_samples must be at least 1, got {job.temporal_samples}")
+
         print(f"[LOG] Renderer init: output={self.output_width}x{self.output_height}, internal={self.internal_width}x{self.internal_height}, ss_scale={scale}")
         print(f"[LOG] Job params: tiles={job.tiles_x}x{job.tiles_y}, temporal_samples={job.temporal_samples}, bit_depth={job.default_bit_depth}")
 

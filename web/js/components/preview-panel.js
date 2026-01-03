@@ -41,12 +41,14 @@ class PreviewPanel extends HTMLElement {
                 if (cameraModeSelect) cameraModeSelect.value = modeIndex;
             }
 
-            if (config.camera_params?.tilt_deg !== undefined && this.renderer) {
-                this.renderer.cameraTilt = config.camera_params.tilt_deg;
+            // Support both new flat format (camera_tilt_deg) and old nested format
+            const tiltValue = config.camera_tilt_deg ?? config.camera_params?.tilt_deg;
+            if (tiltValue !== undefined && this.renderer) {
+                this.renderer.cameraTilt = tiltValue;
                 const cameraTiltSlider = this.querySelector('#camera-tilt');
                 const tiltDisplay = this.querySelector('#tilt-display');
-                if (cameraTiltSlider) cameraTiltSlider.value = config.camera_params.tilt_deg;
-                if (tiltDisplay) tiltDisplay.textContent = `${config.camera_params.tilt_deg}°`;
+                if (cameraTiltSlider) cameraTiltSlider.value = tiltValue;
+                if (tiltDisplay) tiltDisplay.textContent = `${tiltValue}°`;
             }
 
             // Re-render with updated settings
@@ -151,16 +153,13 @@ class PreviewPanel extends HTMLElement {
                     this.renderer.render();
                 }
             }
-            // Sync to config editor
+            // Sync to config editor (use flat camera_tilt_deg format)
             const configEditor = document.querySelector('config-editor');
             if (configEditor) {
-                if (!configEditor.config.camera_params) {
-                    configEditor.config.camera_params = {};
-                }
-                configEditor.config.camera_params.tilt_deg = tilt;
+                configEditor.config.camera_tilt_deg = tilt;
                 configEditor.saveToLocalStorage();
                 // Update config editor UI
-                const inputEl = configEditor.querySelector('input[name="camera_tilt"]');
+                const inputEl = configEditor.querySelector('input[name="camera_tilt_deg"]');
                 if (inputEl) inputEl.value = tilt;
             }
         });

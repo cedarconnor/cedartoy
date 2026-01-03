@@ -57,23 +57,35 @@ async def get_audio_info():
     return {"metadata": audio_state["metadata"]}
 
 @router.get("/waveform")
-async def get_waveform(samples: int = 1000):
+async def get_waveform(num_samples: int = 1000):
     """Get downsampled waveform for visualization"""
     if not audio_state["processor"]:
         raise HTTPException(status_code=404, detail="No audio loaded")
 
-    # Downsample audio data for waveform display
-    audio_data = audio_state["processor"].data
-    total_samples = len(audio_data)
+    processor = audio_state["processor"]
 
-    if total_samples <= samples:
-        waveform = audio_data.tolist()
+    # Access the samples from AudioData object
+    if processor.data is None or processor.data.samples is None:
+        raise HTTPException(status_code=500, detail="Audio data not loaded")
+
+    # Get mono waveform (average channels if stereo)
+    samples_array = processor.data.samples
+    if samples_array.ndim > 1 and samples_array.shape[1] > 1:
+        mono = np.mean(samples_array, axis=1)
+    else:
+        mono = samples_array.flatten()
+
+    total_samples = len(mono)
+
+    # Downsample for visualization
+    if total_samples <= num_samples:
+        waveform = mono.tolist()
     else:
         # Simple decimation
-        step = total_samples // samples
-        waveform = audio_data[::step][:samples].tolist()
+        step = total_samples // num_samples
+        waveform = mono[::step][:num_samples].tolist()
 
-    return {"waveform": waveform}
+    return {"waveform": waveform, "total_samples": total_samples}
 
 @router.get("/fft/{frame}")
 async def get_fft(frame: int):

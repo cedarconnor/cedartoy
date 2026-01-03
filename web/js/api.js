@@ -68,7 +68,7 @@ export const api = {
         return await res.json();
     },
 
-    // Audio (placeholder for Phase 4)
+    // Audio
     async uploadAudio(file) {
         const formData = new FormData();
         formData.append('file', file);
@@ -76,6 +76,21 @@ export const api = {
             method: 'POST',
             body: formData
         });
+        return await res.json();
+    },
+
+    async getAudioInfo() {
+        const res = await fetch(`${API_BASE}/audio/info`);
+        return await res.json();
+    },
+
+    async getWaveform(numSamples = 1000) {
+        const res = await fetch(`${API_BASE}/audio/waveform?num_samples=${numSamples}`);
+        return await res.json();
+    },
+
+    async getAudioFFT(frame) {
+        const res = await fetch(`${API_BASE}/audio/fft/${frame}`);
         return await res.json();
     },
 

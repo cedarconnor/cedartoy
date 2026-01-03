@@ -3,7 +3,9 @@ import asyncio
 import subprocess
 import json
 import sys
+import queue
 from pathlib import Path
+from typing import Optional
 
 router = APIRouter()
 
@@ -31,7 +33,7 @@ async def websocket_render(websocket: WebSocket):
             active_connections.remove(websocket)
 
 async def handle_render(websocket: WebSocket, data):
-    """Execute render and stream progress"""
+    """Execute render and stream progress using thread-safe queue"""
     from .api.render import render_state
 
     config_file = data.get("config_file")
@@ -46,7 +48,7 @@ async def handle_render(websocket: WebSocket, data):
     cmd = [sys.executable, "-m", "cedartoy.cli", "render", "--config", config_file]
 
     try:
-        # Start subprocess
+        # Start subprocess with pipes
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -56,22 +58,58 @@ async def handle_render(websocket: WebSocket, data):
         )
 
         render_state["process"] = process
+        render_state["active"] = True
 
-        # Stream stderr (progress logs) in a non-blocking way
+        # Use a thread-safe queue for communication
+        message_queue: queue.Queue = queue.Queue()
+
         import threading
 
-        def read_stderr():
-            for line in iter(process.stderr.readline, ''):
-                if not line:
-                    break
-                asyncio.run(process_log_line(websocket, line))
+        def read_stream(stream, prefix: str):
+            """Read from stream and put lines in queue. Drains properly."""
+            try:
+                for line in iter(stream.readline, ''):
+                    if line:
+                        message_queue.put((prefix, line.strip()))
+                stream.close()
+            except Exception as e:
+                message_queue.put(("error", str(e)))
 
-        stderr_thread = threading.Thread(target=read_stderr, daemon=True)
+        # Start threads to read both stdout and stderr (prevents deadlock)
+        stdout_thread = threading.Thread(
+            target=read_stream,
+            args=(process.stdout, "stdout"),
+            daemon=True
+        )
+        stderr_thread = threading.Thread(
+            target=read_stream,
+            args=(process.stderr, "stderr"),
+            daemon=True
+        )
+        stdout_thread.start()
         stderr_thread.start()
 
-        # Wait for process to complete
-        while process.poll() is None:
-            await asyncio.sleep(0.1)
+        # Process messages from queue while process runs
+        while process.poll() is None or not message_queue.empty():
+            try:
+                # Non-blocking get with timeout
+                prefix, line = message_queue.get(timeout=0.1)
+                await process_log_line(websocket, line)
+            except queue.Empty:
+                # No message available, continue waiting
+                await asyncio.sleep(0.05)
+
+        # Wait for threads to finish draining
+        stdout_thread.join(timeout=1.0)
+        stderr_thread.join(timeout=1.0)
+
+        # Process any remaining messages
+        while not message_queue.empty():
+            try:
+                prefix, line = message_queue.get_nowait()
+                await process_log_line(websocket, line)
+            except queue.Empty:
+                break
 
         # Process finished
         return_code = process.returncode
@@ -88,11 +126,14 @@ async def handle_render(websocket: WebSocket, data):
         render_state["process"] = None
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         await websocket.send_json({
             "type": "render_error",
             "message": f"Render error: {str(e)}"
         })
         render_state["active"] = False
+        render_state["process"] = None
 
 async def process_log_line(websocket: WebSocket, line: str):
     """Process a single log line from render output"""
