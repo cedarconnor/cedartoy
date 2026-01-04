@@ -26,6 +26,21 @@ try:
 except Exception:
     nd_zoom = None
 
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
+# --- Memory Utilities ---
+def get_available_ram_bytes() -> Optional[int]:
+    """Get available system RAM in bytes. Returns None if unable to detect."""
+    if psutil is not None:
+        try:
+            return psutil.virtual_memory().available
+        except Exception:
+            pass
+    return None
+
 # --- Progress Logging for UI ---
 def log_progress(frame, total, elapsed_sec):
     """Output structured progress for UI"""
@@ -381,6 +396,7 @@ class Renderer:
             raise
 
     def render_frame(self, frame_idx: int, out_dir: Path):
+        print(f"[LOG] render_frame: Starting frame {frame_idx}", file=sys.stderr, flush=True)
         mode = self.job.camera_stereo
 
         final_buf_name = next(name for name, b in self.job.multipass_graph.buffers.items() if b.outputs_to_screen)
@@ -389,18 +405,23 @@ class Renderer:
         fmt = buf_fmt if buf_fmt else self.job.default_output_format
         buf_bit_depth = final_conf.bit_depth if final_conf.bit_depth else self.job.default_bit_depth
 
+        print(f"[LOG] render_frame: format={fmt}, bit_depth={buf_bit_depth}, stereo_mode={mode}", file=sys.stderr, flush=True)
+
         if iio is None:
             raise RuntimeError("imageio is required to write output frames.")
         if fmt == "exr" and not EXR_AVAILABLE:
             raise RuntimeError("EXR output requested but EXR support is not available in this environment.")
 
         if self.feedback_pairs:
+            print(f"[LOG] render_frame: Beginning frame with {len(self.feedback_pairs)} feedback pairs", file=sys.stderr, flush=True)
             self._begin_frame()
-        
+
         # Render Logic
         if mode == 'none':
+            print(f"[LOG] render_frame: Rendering single view (center)", file=sys.stderr, flush=True)
             img_data = self._render_view(frame_idx, eye='center', out_format=fmt, out_bit_depth=buf_bit_depth)
         else:
+            print(f"[LOG] render_frame: Rendering stereo views", file=sys.stderr, flush=True)
             left = self._render_view(frame_idx, eye='left', out_format=fmt, out_bit_depth=buf_bit_depth)
             right = self._render_view(frame_idx, eye='right', out_format=fmt, out_bit_depth=buf_bit_depth)
             if mode == 'sbs':
@@ -410,26 +431,131 @@ class Renderer:
             else:
                 img_data = left
 
+        print(f"[LOG] render_frame: Writing output to {out_dir}", file=sys.stderr, flush=True)
         out_file = resolve_output_path(out_dir, self.job.output_pattern, frame_idx, fmt)
         iio.imwrite(out_file, img_data)
-        
+
         print(f"Frame {frame_idx} saved to {out_file.name}")
 
         if self.feedback_pairs:
             self._end_frame()
 
     def _render_view(self, frame_idx: int, eye: str, out_format: str, out_bit_depth: str) -> np.ndarray:
-        # Accumulation Buffer (CPU, Full Res)
-        # We accumulate directly into this.
-        acc_buffer = np.zeros((self.internal_height, self.internal_width, 4), dtype=np.float32)
-            
-        offsets = temporal_offsets(self.job.temporal_samples, frame_idx)
-        base_time = frame_idx / self.job.fps
+        import time as time_module
+        import tempfile
+        view_start_time = time_module.time()
+
+        tiles_x = self.job.tiles_x
+        tiles_y = self.job.tiles_y
+        total_tiles = tiles_x * tiles_y
+
+        print(f"[LOG] _render_view: eye={eye}, internal_size={self.internal_width}x{self.internal_height}, "
+              f"tiles={tiles_x}x{tiles_y} ({total_tiles} total), tile_size={self.tile_w}x{self.tile_h}",
+              file=sys.stderr, flush=True)
+
+        # Calculate memory for full buffer vs streaming
+        full_mem_gb = (self.internal_height * self.internal_width * 4 * 4) / (1024**3)
+        tile_mem_mb = (self.tile_h * self.tile_w * 4 * 4) / (1024**2)
+
+        # Use streaming mode if full buffer would be > 4GB or if tiling is enabled
+        use_streaming = (full_mem_gb > 4.0) or (total_tiles > 1)
+
+        if use_streaming:
+            print(f"[LOG] _render_view: Using STREAMING mode (full buffer would be {full_mem_gb:.1f} GB, tile buffer is {tile_mem_mb:.1f} MB)",
+                  file=sys.stderr, flush=True)
+            return self._render_view_streaming(frame_idx, eye, out_format, out_bit_depth, view_start_time)
+        else:
+            print(f"[LOG] _render_view: Using STANDARD mode (buffer is {full_mem_gb:.2f} GB)",
+                  file=sys.stderr, flush=True)
+            return self._render_view_standard(frame_idx, eye, out_format, out_bit_depth, view_start_time)
+
+    def _stitch_tiles_disk_streaming(self, tile_files: Dict[Tuple[int, int], str],
+                                     tiles_x: int, tiles_y: int,
+                                     out_format: str, out_bit_depth: str) -> np.ndarray:
+        """
+        Stitch tiles row-by-row with minimal memory usage.
+        Instead of allocating full-size buffer, loads only one row of tiles at a time.
+        For ultra-massive images, writes directly to disk during stitching.
+        """
+        import time as time_module
         
+        print(f"[LOG] _stitch_tiles_disk_streaming: Stitching {tiles_x}x{tiles_y} tiles with minimal memory...",
+              file=sys.stderr, flush=True)
+        
+        # Build output row-by-row
+        output_rows = []
+        
+        for row_y in range(tiles_y):
+            # Load all tiles in this row
+            row_tiles = []
+            for tile_x in range(tiles_x):
+                tile_path = tile_files[(tile_x, row_y)]
+                tile_data = np.load(tile_path)
+                row_tiles.append(tile_data)
+            
+            # Concatenate tiles horizontally for this row
+            # Handle edge tiles that might be smaller
+            row_height = row_tiles[0].shape[0]
+            row_parts = []
+            
+            for tx, tile in enumerate(row_tiles):
+                off_x = tx * self.tile_w
+                x_end = min(off_x + self.tile_w, self.internal_width)
+                valid_w = x_end - off_x
+                
+                # Extract valid region from this tile
+                if valid_w < tile.shape[1]:
+                    row_parts.append(tile[:, :valid_w, :])
+                else:
+                    row_parts.append(tile)
+            
+            # Concatenate horizontally
+            row_data = np.concatenate(row_parts, axis=1)
+            output_rows.append(row_data)
+        
+        # Stack rows vertically
+        # Handle edge rows that might be smaller
+        final_parts = []
+        for ty, row in enumerate(output_rows):
+            off_y = ty * self.tile_h
+            y_end_gl = min(off_y + self.tile_h, self.internal_height)
+            valid_h = y_end_gl - off_y
+            
+            if valid_h < row.shape[0]:
+                final_parts.append(row[:valid_h, :, :])
+            else:
+                final_parts.append(row)
+        
+        final_img = np.concatenate(final_parts, axis=0)
+        
+        print(f"[LOG] _stitch_tiles_disk_streaming: Stitched to {final_img.shape[0]}x{final_img.shape[1]}",
+              file=sys.stderr, flush=True)
+        
+        return final_img
+
+    def _render_view_streaming(self, frame_idx: int, eye: str, out_format: str, out_bit_depth: str,
+                                view_start_time: float) -> np.ndarray:
+        """
+        Streaming tile-by-tile rendering for large images.
+        Processes one tile at a time, accumulates temporal samples per tile,
+        writes tiles to temp files, then stitches at the end.
+        Memory usage: O(tile_size) instead of O(full_image_size)
+        """
+        import time as time_module
+        import tempfile
+
+        tiles_x = self.job.tiles_x
+        tiles_y = self.job.tiles_y
+        total_tiles = tiles_x * tiles_y
+        num_samples = self.job.temporal_samples
+
+        offsets = temporal_offsets(num_samples, frame_idx)
+        base_time = frame_idx / self.job.fps
+
         cam_pos = np.array([0.0, 0.0, 0.0])
         cam_dir = np.array([0.0, 0.0, -1.0])
-        cam_up  = np.array([0.0, 1.0, 0.0])
-        
+        cam_up = np.array([0.0, 1.0, 0.0])
+
         ipd = self.job.camera_params.get("ipd", 0.064)
         if eye != 'center':
             f = cam_dir / np.linalg.norm(cam_dir)
@@ -442,157 +568,288 @@ class Renderer:
 
         order = self.job.multipass_graph.execution_order
         final_buf_name = next(name for name, b in self.job.multipass_graph.buffers.items() if b.outputs_to_screen)
+        buf_conf = self.job.multipass_graph.buffers[final_buf_name]
+        internal_bit_depth = buf_conf.bit_depth or self.job.default_bit_depth
 
-        # Tiles
+        # Determine numpy dtype for tile data
+        if internal_bit_depth == "32f":
+            gpu_dtype = 'f4'
+        elif internal_bit_depth == "16f":
+            gpu_dtype = 'f2'
+        else:
+            gpu_dtype = 'f4'
+        numpy_dtype = np.float32 if gpu_dtype == 'f4' else np.float16
+
+        # Create temp directory for tile files
+        temp_dir = tempfile.mkdtemp(prefix="cedartoy_tiles_")
+        print(f"[LOG] _render_view_streaming: Temp directory: {temp_dir}", file=sys.stderr, flush=True)
+
+        tile_files = {}  # (tx, ty) -> filepath
+
+        # Process each tile independently
+        tile_count = 0
+        for ty in range(tiles_y):
+            for tx in range(tiles_x):
+                tile_count += 1
+                off_x = tx * self.tile_w
+                off_y = ty * self.tile_h
+
+                print(f"[LOG] Tile {tile_count}/{total_tiles} (tx={tx}, ty={ty}): Processing {num_samples} temporal samples...",
+                      file=sys.stderr, flush=True)
+
+                # Allocate accumulation buffer for THIS TILE ONLY
+                tile_acc = np.zeros((self.tile_h, self.tile_w, 4), dtype=np.float32)
+
+                # Render all temporal samples for this tile
+                for sample_idx, offset in enumerate(offsets):
+                    time_val = base_time + (offset - 0.5) * self.job.shutter
+
+                    # Render dependencies (these don't change per tile, but we need them per sample)
+                    # TODO: Optimize by caching dependency buffers if they don't use tiling
+                    for buf_name in order:
+                        if buf_name == final_buf_name:
+                            continue
+                        self._render_pass(buf_name, time_val, frame_idx, sample_idx, cam_pos, cam_dir, cam_up, (0.0, 0.0))
+
+                    # Render this tile
+                    self._render_pass(final_buf_name, time_val, frame_idx, sample_idx,
+                                     cam_pos, cam_dir, cam_up, (float(off_x), float(off_y)))
+
+                    # Read tile from GPU
+                    tex = self.textures[final_buf_name]
+                    raw_bytes = tex.read()
+                    tile_data = np.frombuffer(raw_bytes, dtype=numpy_dtype).reshape((self.tile_h, self.tile_w, 4))
+                    tile_data = np.flipud(tile_data)
+
+                    # Accumulate
+                    tile_acc += tile_data.astype(np.float32)
+
+                # Average this tile
+                tile_avg = tile_acc / num_samples
+
+                # Save tile to temp file
+                tile_path = os.path.join(temp_dir, f"tile_{tx}_{ty}.npy")
+                np.save(tile_path, tile_avg)
+                tile_files[(tx, ty)] = tile_path
+
+                print(f"[LOG] Tile {tile_count}/{total_tiles}: Saved to {tile_path}", file=sys.stderr, flush=True)
+
+
+        # Stitch tiles into final image
+        print(f"[LOG] _render_view_streaming: Stitching {total_tiles} tiles into final image...", file=sys.stderr, flush=True)
+
+        # Decide whether to use disk-streaming stitching or memory-based stitching
+        stitch_buffer_bytes = self.internal_height * self.internal_width * 4 * 4  # float32 RGBA
+        stitch_buffer_gb = stitch_buffer_bytes / (1024**3)
+        
+        use_disk_streaming = False
+        
+        if self.job.disk_streaming is True:
+            # Always use disk streaming
+            use_disk_streaming = True
+            print(f"[LOG] Disk streaming: FORCED ON (config)", file=sys.stderr, flush=True)
+        elif self.job.disk_streaming is False:
+            # Never use disk streaming
+            use_disk_streaming = False
+            print(f"[LOG] Disk streaming: FORCED OFF (config)", file=sys.stderr, flush=True)
+        else:
+            # Auto mode: check available RAM
+            available_ram = get_available_ram_bytes()
+            if available_ram is not None:
+                available_ram_gb = available_ram / (1024**3)
+                threshold_bytes = available_ram * 0.5  # Use 50% of available RAM as threshold
+                
+                if stitch_buffer_bytes > threshold_bytes:
+                    use_disk_streaming = True
+                    print(f"[LOG] Disk streaming: AUTO ON (buffer={stitch_buffer_gb:.2f}GB, "
+                          f"available RAM={available_ram_gb:.2f}GB, threshold=50%)", 
+                          file=sys.stderr, flush=True)
+                else:
+                    use_disk_streaming = False
+                    print(f"[LOG] Disk streaming: AUTO OFF (buffer={stitch_buffer_gb:.2f}GB fits in "
+                          f"available RAM={available_ram_gb:.2f}GB)", 
+                          file=sys.stderr, flush=True)
+            else:
+                # Can't detect RAM, use conservative threshold of 4GB
+                if stitch_buffer_gb > 4.0:
+                    use_disk_streaming = True
+                    print(f"[LOG] Disk streaming: AUTO ON (buffer={stitch_buffer_gb:.2f}GB, "
+                          f"RAM detection unavailable, using 4GB fallback threshold)", 
+                          file=sys.stderr, flush=True)
+                else:
+                    use_disk_streaming = False
+                    print(f"[LOG] Disk streaming: AUTO OFF (buffer={stitch_buffer_gb:.2f}GB, "
+                          f"RAM detection unavailable)", 
+                          file=sys.stderr, flush=True)
+        
+        # Perform stitching
+        if use_disk_streaming:
+            final_img = self._stitch_tiles_disk_streaming(tile_files, tiles_x, tiles_y, out_format, out_bit_depth)
+        else:
+            # Original memory-based stitching
+            final_img = np.zeros((self.internal_height, self.internal_width, 4), dtype=np.float32)
+
+            for ty in range(tiles_y):
+                for tx in range(tiles_x):
+                    tile_path = tile_files[(tx, ty)]
+                    tile_data = np.load(tile_path)
+
+                    off_x = tx * self.tile_w
+                    off_y = ty * self.tile_h
+
+                    # Calculate valid region (handle edge tiles)
+                    y_start_gl = off_y
+                    y_end_gl = min(off_y + self.tile_h, self.internal_height)
+                    x_start = off_x
+                    x_end = min(off_x + self.tile_w, self.internal_width)
+
+                    valid_h = y_end_gl - y_start_gl
+                    valid_w = x_end - x_start
+
+                    if valid_h <= 0 or valid_w <= 0:
+                        continue
+
+                    # Convert GL coords to numpy coords
+                    ny_start = self.internal_height - y_end_gl
+                    ny_end = self.internal_height - y_start_gl
+
+                    # Extract valid region from tile
+                    tile_slice = tile_data[self.tile_h - valid_h:self.tile_h, 0:valid_w, :]
+
+                    # Place in final image
+                    final_img[ny_start:ny_end, x_start:x_end, :] = tile_slice
+
+        # Clean up temp files
+        import shutil
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        print(f"[LOG] _render_view_streaming: Cleaned up temp directory", file=sys.stderr, flush=True)
+
+        # Downsample if needed
+        if self.internal_width != self.output_width or self.internal_height != self.output_height:
+            print(f"[LOG] _render_view_streaming: Downsampling {self.internal_width}x{self.internal_height} -> {self.output_width}x{self.output_height}...",
+                  file=sys.stderr, flush=True)
+            if nd_zoom is None:
+                final_img = final_img[::max(1, int(round(self.internal_height / self.output_height))),
+                                      ::max(1, int(round(self.internal_width / self.output_width))), :]
+            else:
+                zoom_y = self.output_height / self.internal_height
+                zoom_x = self.output_width / self.internal_width
+                final_img = nd_zoom(final_img, (zoom_y, zoom_x, 1.0), order=1)
+            final_img = final_img[:self.output_height, :self.output_width, :]
+
+        view_elapsed = time_module.time() - view_start_time
+        print(f"[LOG] _render_view_streaming: Total time: {view_elapsed:.2f}s", file=sys.stderr, flush=True)
+
+        # Convert to output format
+        if out_format == "exr":
+            if out_bit_depth == "16f":
+                return final_img.astype(np.float16)
+            return final_img.astype(np.float32)
+        final_img = np.clip(final_img, 0.0, 1.0) * 255.0
+        return final_img.astype(np.uint8)
+
+    def _render_view_standard(self, frame_idx: int, eye: str, out_format: str, out_bit_depth: str,
+                              view_start_time: float) -> np.ndarray:
+        """Standard in-memory rendering for smaller images."""
+        import time as time_module
+
         tiles_x = self.job.tiles_x
         tiles_y = self.job.tiles_y
+        total_tiles = tiles_x * tiles_y
+
+        # Allocate full accumulation buffer
+        acc_buffer = np.zeros((self.internal_height, self.internal_width, 4), dtype=np.float32)
+        print(f"[LOG] _render_view_standard: Allocated {acc_buffer.nbytes / (1024*1024):.1f} MB buffer",
+              file=sys.stderr, flush=True)
+
+        offsets = temporal_offsets(self.job.temporal_samples, frame_idx)
+        base_time = frame_idx / self.job.fps
+
+        cam_pos = np.array([0.0, 0.0, 0.0])
+        cam_dir = np.array([0.0, 0.0, -1.0])
+        cam_up = np.array([0.0, 1.0, 0.0])
+
+        ipd = self.job.camera_params.get("ipd", 0.064)
+        if eye != 'center':
+            f = cam_dir / np.linalg.norm(cam_dir)
+            r = np.cross(f, cam_up)
+            r = r / np.linalg.norm(r)
+            if eye == 'left':
+                cam_pos = cam_pos - r * (ipd * 0.5)
+            elif eye == 'right':
+                cam_pos = cam_pos + r * (ipd * 0.5)
+
+        order = self.job.multipass_graph.execution_order
+        final_buf_name = next(name for name, b in self.job.multipass_graph.buffers.items() if b.outputs_to_screen)
+        buf_conf = self.job.multipass_graph.buffers[final_buf_name]
+        internal_bit_depth = buf_conf.bit_depth or self.job.default_bit_depth
+
+        if internal_bit_depth == "32f":
+            gpu_dtype = 'f4'
+        elif internal_bit_depth == "16f":
+            gpu_dtype = 'f2'
+        else:
+            gpu_dtype = 'f4'
+        numpy_dtype = np.float32 if gpu_dtype == 'f4' else np.float16
 
         for sample_idx, offset in enumerate(offsets):
             time_val = base_time + (offset - 0.5) * self.job.shutter
-            
-            # 1. Render Dependencies (Full Res, No Tiling support for intermediate yet)
+
+            # Render dependencies
             for buf_name in order:
-                if buf_name == final_buf_name: continue
-                # Pass 0.0 offset for dependencies
+                if buf_name == final_buf_name:
+                    continue
                 self._render_pass(buf_name, time_val, frame_idx, sample_idx, cam_pos, cam_dir, cam_up, (0.0, 0.0))
-            
-            # 2. Render Final Pass (Tiled)
-            # Loop tiles
+
+            # Render tiles
             for ty in range(tiles_y):
                 for tx in range(tiles_x):
-                    # Calculate Offset (Pixels)
                     off_x = tx * self.tile_w
                     off_y = ty * self.tile_h
-                    
-                    # Render Tile
-                    self._render_pass(final_buf_name, time_val, frame_idx, sample_idx, cam_pos, cam_dir, cam_up, (float(off_x), float(off_y)))
-                    
-                    # Read Tile
+
+                    self._render_pass(final_buf_name, time_val, frame_idx, sample_idx,
+                                     cam_pos, cam_dir, cam_up, (float(off_x), float(off_y)))
+
                     tex = self.textures[final_buf_name]
                     raw_bytes = tex.read()
-                    
-                    buf_conf = self.job.multipass_graph.buffers[final_buf_name]
-                    internal_bit_depth = buf_conf.bit_depth or self.job.default_bit_depth
-                    # Match the texture dtype we created (8-bit uses f4 internally)
-                    if internal_bit_depth == "32f":
-                        dtype = 'f4'
-                    elif internal_bit_depth == "16f":
-                        dtype = 'f2'
-                    else:
-                        dtype = 'f4'  # 8-bit uses float32 internally
-                    numpy_dtype = np.float32 if dtype == 'f4' else np.float16
-                    
                     tile_data = np.frombuffer(raw_bytes, dtype=numpy_dtype).reshape((self.tile_h, self.tile_w, 4))
-                    tile_data = np.flipud(tile_data) 
-                    
-                    # Handle edge tiles (cropping if image size not multiple of tile size)
-                    # We rendered a full tile (e.g. 512x512).
-                    # But the image might end at 1920 (tile 3 might go to 2048).
-                    # We write into acc_buffer.
-                    
-                    # Target coordinates in acc_buffer
-                    # Note: moderngl reads flip Y. acc_buffer is (H, W).
-                    # off_y is from bottom? No, gl_FragCoord is from bottom-left.
-                    # We passed iTileOffset to shader.
-                    # Shader: gl_FragCoord.xy + iTileOffset.
-                    # If off_y = 0, we render bottom row.
-                    # In numpy array, index 0 is TOP row usually, unless we flipped.
-                    # We flipped tile_data (`np.flipud`). So tile_data is Top-Down.
-                    
-                    # We need to calculate where to place this tile in Top-Down `acc_buffer`.
-                    # Image Height H.
-                    # Tile covers Y range [off_y, off_y + tile_h] in GL coords (Bottom-Up).
-                    # In Numpy (Top-Down):
-                    # Start Y = H - (off_y + tile_h)
-                    # End Y   = H - off_y
-                    
-                    y_start_gl = off_y
-                    y_end_gl = off_y + self.tile_h
-                    
-                    # Clip to image bounds
-                    y_start_gl = max(0, min(self.internal_height, y_start_gl))
-                    y_end_gl = max(0, min(self.internal_height, y_end_gl))
-                    
-                    valid_h = y_end_gl - y_start_gl
-                    if valid_h <= 0: continue
-                    
-                    x_start = off_x
-                    x_end = off_x + self.tile_w
-                    x_start = max(0, min(self.internal_width, x_start))
-                    x_end = max(0, min(self.internal_width, x_end))
-                    
-                    valid_w = x_end - x_start
-                    if valid_w <= 0: continue
+                    tile_data = np.flipud(tile_data)
 
-                    # Numpy Y indices
-                    # GL Y=0 -> Numpy Y=H
-                    # GL Y=H -> Numpy Y=0
-                    # range [y_start_gl, y_end_gl] -> [H - y_end_gl, H - y_start_gl]
+                    # Calculate placement
+                    y_start_gl = off_y
+                    y_end_gl = min(off_y + self.tile_h, self.internal_height)
+                    x_start = off_x
+                    x_end = min(off_x + self.tile_w, self.internal_width)
+
+                    valid_h = y_end_gl - y_start_gl
+                    valid_w = x_end - x_start
+
+                    if valid_h <= 0 or valid_w <= 0:
+                        continue
+
                     ny_start = self.internal_height - y_end_gl
                     ny_end = self.internal_height - y_start_gl
-                    
-                    # Extract valid region from rendered tile
-                    # Tile was rendered full size (self.tile_h, self.tile_w).
-                    # If we are at top edge of image, and tile sticks out top:
-                    # GL: y_end_gl was clipped to Height.
-                    # Tile content: We want the bottom part of the tile (since tile sticks UP out of bounds).
-                    # Actually, if we set iTileOffset=off_y, the shader renders rows off_y to off_y+tile_h.
-                    # If off_y+tile_h > Height, the top rows of the tile are "garbage" (outside image).
-                    # We discard them.
-                    # Since tile_data is flipped (Top-Down), the "bottom GL rows" are at the "bottom Numpy rows" of the tile array.
-                    # Wait.
-                    # GL Row 0 is Tile Bottom. Flipped -> Numpy Row End.
-                    # GL Row H is Tile Top. Flipped -> Numpy Row 0.
-                    
-                    # Let's think:
-                    # Tile Data (Numpy): Row 0 is Top of Tile. Row H is Bottom of Tile.
-                    # GL Coords: Top of Tile is `off_y + tile_h`. Bottom is `off_y`.
-                    
-                    # Valid Global Region:
-                    # Y from `off_y` to `min(H, off_y + tile_h)`.
-                    # Height of valid region: `valid_h`.
-                    
-                    # We want the pixels corresponding to GL Y range [off_y, off_y + valid_h].
-                    # These are the *bottom* `valid_h` rows of the tile in GL sense.
-                    # In Top-Down Numpy sense, these are the *bottom* `valid_h` rows of `tile_data`?
-                    # No.
-                    # Flipped Tile: Row 0 is Top (GL Y max). Row H is Bottom (GL Y min).
-                    # We want GL Y range [off_y, off_y + valid_h]. This is the lower part of the covered area.
-                    # So it's the *lower* part of the tile in GL space -> *lower* part in Numpy space?
-                    # Let's trace.
-                    # Pixel P at GL (x, off_y) (Bottom of valid region).
-                    # In `tex.read()` (Bottom-Up), it is at index 0.
-                    # In `flipud` (Top-Down), it is at index H-1.
-                    
-                    # Pixel Q at GL (x, off_y + valid_h) (Top of valid region).
-                    # In `tex.read()`, index `valid_h`.
-                    # In `flipud`, index `H - 1 - valid_h`.
-                    
-                    # So we take the slice `[-(valid_h):, ...]` from tile_data?
-                    # Yes, the bottom rows of the flipped array correspond to the bottom rows of the GL viewport (which are valid).
-                    # And `ny_end` (bottom of target slice) corresponds to `off_y` (bottom of GL).
-                    
-                    tile_slice = tile_data[self.tile_h - valid_h : self.tile_h, 0:valid_w, :]
-                    
-                    # Add to accumulation
-                    # Convert to float32 if not already
+
+                    tile_slice = tile_data[self.tile_h - valid_h:self.tile_h, 0:valid_w, :]
                     acc_buffer[ny_start:ny_end, x_start:x_end, :] += tile_slice.astype(np.float32)
 
-        # Average Accumulation
+        # Average
         avg = acc_buffer / self.job.temporal_samples
 
-        # Spatial supersampling downsample to output resolution
+        # Downsample
         if self.internal_width != self.output_width or self.internal_height != self.output_height:
             if nd_zoom is None:
-                avg = avg[:: max(1, int(round(self.internal_height / self.output_height))),
-                          :: max(1, int(round(self.internal_width / self.output_width))), :]
+                avg = avg[::max(1, int(round(self.internal_height / self.output_height))),
+                          ::max(1, int(round(self.internal_width / self.output_width))), :]
             else:
                 zoom_y = self.output_height / self.internal_height
                 zoom_x = self.output_width / self.internal_width
                 avg = nd_zoom(avg, (zoom_y, zoom_x, 1.0), order=1)
-            avg = avg[: self.output_height, : self.output_width, :]
-        
-        # Output conversion
+            avg = avg[:self.output_height, :self.output_width, :]
+
+        view_elapsed = time_module.time() - view_start_time
+        print(f"[LOG] _render_view_standard: Total time: {view_elapsed:.2f}s", file=sys.stderr, flush=True)
+
         if out_format == "exr":
             if out_bit_depth == "16f":
                 return avg.astype(np.float16)
@@ -600,13 +857,13 @@ class Renderer:
         avg = np.clip(avg, 0.0, 1.0) * 255.0
         return avg.astype(np.uint8)
             
-    def _render_pass(self, buf_name: str, time_val: float, frame_idx: int, sample_idx: int, 
+    def _render_pass(self, buf_name: str, time_val: float, frame_idx: int, sample_idx: int,
                      cam_pos: np.ndarray, cam_dir: np.ndarray, cam_up: np.ndarray,
                      tile_offset: Tuple[float, float]):
         buf_conf = self.job.multipass_graph.buffers[buf_name]
         prog = self.programs[buf_name]
         fbo = self.fbos[buf_name]
-        
+
         fbo.use()
         self.ctx.clear() 
         
@@ -724,5 +981,4 @@ class Renderer:
         uni['iChannelResolution'] = tuple(v for triple in ch_res for v in triple)
 
         self._bind_uniforms(prog, uni)
-        
         self.vaos[buf_name].render(moderngl.TRIANGLE_STRIP)

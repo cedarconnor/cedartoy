@@ -18,3 +18,5 @@ audio_output/
 .idea/
 *.swp
 .DS_Store
+_output/
+debug_log*.txt

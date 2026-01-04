@@ -87,5 +87,10 @@ OPTIONS.append(Option("camera_tilt_deg", "Tilt (LL180)", "float", 65.0))
 OPTIONS.append(Option("camera_ipd", "IPD", "float", 0.064))
 
 # --- Paths ---
+OPTIONS.append(Option(
+    "disk_streaming", "Disk Streaming Mode", "choice", None,
+    choices=[None, True, False],
+    help_text="Auto (None): use disk streaming if buffer exceeds 50% available RAM. True: always use. False: never use."
+))
 OPTIONS.append(Option("output_dir", "Output Directory", "path", "renders"))
 OPTIONS.append(Option("output_pattern", "Output Pattern", "str", "frame_{frame:05d}.{ext}"))

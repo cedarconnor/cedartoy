@@ -185,6 +185,7 @@ def config_to_job(cfg: dict) -> RenderJob:
             "tilt_deg": cfg["camera_tilt_deg"],
             "ipd": cfg["camera_ipd"]
         },
+        disk_streaming=cfg.get("disk_streaming"),
         multipass_graph=mp
     )
 
@@ -267,6 +268,14 @@ def main():
         for opt in OPTIONS:
             val = getattr(args, opt.name, None)
             if val is not None:
+                # Handle special conversions for choice type with None/True/False
+                if opt.name == "disk_streaming" and isinstance(val, str):
+                    if val.lower() == "none":
+                        val = None
+                    elif val.lower() == "true":
+                        val = True
+                    elif val.lower() == "false":
+                        val = False
                 cli_args[opt.name] = val
         
         # Shader path from positional arg overrides

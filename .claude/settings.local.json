@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(curl:*)",
+      "Bash(cat:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(timeout 5 python:*)",
+      "Bash(python:*)",
+      "Bash(git reset:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Bash(git -C D:cedartoy status)",
+      "Bash(git -C D:cedartoy log --oneline -5)",
+      "Bash(git -C D:cedartoy diff --stat cedartoy/render.py cedartoy/server/api/audio.py cedartoy/server/api/config.py cedartoy/server/api/files.py cedartoy/server/api/shaders.py cedartoy/server/app.py cedartoy/server/websocket.py web/js/api.js web/js/components/config-editor.js web/js/components/preview-panel.js)",
+      "Bash(git -C D:cedartoy diff --stat -- cedartoy/render.py cedartoy/server/api/audio.py cedartoy/server/api/config.py cedartoy/server/api/files.py cedartoy/server/api/shaders.py cedartoy/server/app.py cedartoy/server/websocket.py web/js/api.js web/js/components/config-editor.js web/js/components/preview-panel.js)",
+      "Bash(git -C D:cedartoy add cedartoy/render.py cedartoy/server/api/audio.py cedartoy/server/api/config.py cedartoy/server/api/files.py cedartoy/server/api/shaders.py cedartoy/server/app.py cedartoy/server/websocket.py web/js/api.js web/js/components/config-editor.js web/js/components/preview-panel.js)",
+      "Bash(git -C D:cedartoy status --porcelain)",
+      "Bash(git push:*)"
+    ]
+  }
+}

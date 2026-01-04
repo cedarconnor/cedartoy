@@ -67,5 +67,8 @@ class RenderJob:
     camera_fov: float
     camera_params: Dict[str, Any]      # {"tilt_deg": 65.0, "ipd": 0.064, ...}
 
+    # streaming / memory
+    disk_streaming: Optional[bool]     # None = auto, True = always, False = never
+
     # multipass
     multipass_graph: MultipassGraphConfig
