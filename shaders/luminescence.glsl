@@ -12,6 +12,9 @@
 // YouTube: The Art of Code -> https://www.youtube.com/channel/UCcAlTqd9zID6aNX3TzwxJXg
 // Twitter: @The_ArtOfCode
 
+// @param audio_strength float 2.0 0.0 5.0 "Audio Strength"
+// @param pulse_speed float 2.0 0.0 10.0 "Pulse Speed"
+
 #define INVERTMOUSE -1.
 
 #define MAX_STEPS 100.
@@ -43,6 +46,10 @@ vec3 secondColor2 = vec3(.1, .5, .6);
 
 vec3 bg;	 	// global background color
 vec3 accent;	// color of the phosphorecence
+float g_audio;  // global audio level
+
+uniform float audio_strength;
+uniform float pulse_speed;
 
 float N1( float x ) { return fract(sin(x)*5346.1764); }
 float N2(float x, float y) { return N1(x + y*23414.324); }
@@ -260,7 +267,7 @@ float remap(float a, float b, float c, float d, float t) {
 
 de map( vec3 p, vec3 id ) {
 
-    float t = iTime*2.;
+    float t = iTime * pulse_speed;
     
     float N = N3(id);
     
@@ -270,7 +277,7 @@ de map( vec3 p, vec3 id ) {
     float x = (p.y+N*twopi)*1.+t;
     float r = 1.;
     
-    float pump = cos(x+cos(x))+sin(2.*x)*.2+sin(4.*x)*.02;
+    float pump = cos(x+cos(x))+sin(2.*x)*.2+sin(4.*x)*.02 + g_audio * audio_strength;
     
     x = t + N*twopi;
     p.y -= (cos(x+cos(x))+sin(2.*x)*.2)*.6;
@@ -517,6 +524,10 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
     float s = sin(turn);
     float c = cos(turn);
     mat3 rotX = mat3(c,  0., s, 0., 1., 0., s,  0., -c);
+
+    // Sample Audio (Low Frequency)
+    g_audio = texture(iChannel0, vec2(0.05, 0.25)).x;
+    g_audio = pow(g_audio, 3.0) * 2.0; // Strengthen the beat
     
     #ifdef SINGLE
     float camDist = -10.;
@@ -586,8 +597,8 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
         // Center = Zenith (0,1,0).
         // Top = North/Forward (0,0,1).
         
-        vec3 domeForward = vec3(0., 1., 0.); // Look Up
-        vec3 domeUp = vec3(0., 0., 1.);      // Top of image is Z+
+        vec3 domeForward = vec3(0., 0., 1.); // Look Forward (Z+) - Tunnel direction
+        vec3 domeUp = vec3(0., 1., 0.);      // World Up (Y+)
         vec3 domeRight = vec3(1., 0., 0.);
         
         mat3 camBasis = mat3(domeRight, domeUp, domeForward);

@@ -8,25 +8,19 @@ class ConfigEditor extends HTMLElement {
     }
 
     async connectedCallback() {
-        // Load schema and defaults
         const [schemaData, defaultsData] = await Promise.all([
             api.getSchema(),
             api.getDefaults()
         ]);
 
         this.schema = schemaData.options;
-
-        // Load from localStorage or use defaults
         const savedConfig = this.loadFromLocalStorage();
         this.config = savedConfig || defaultsData.config;
 
-        // Ensure camera settings have defaults if missing
         if (!this.config.camera_mode) {
             this.config.camera_mode = '2d';
         }
-        // Ensure camera_tilt_deg exists at top level (not nested in camera_params)
         if (this.config.camera_tilt_deg === undefined) {
-            // Try to migrate from old nested format
             if (this.config.camera_params?.tilt_deg !== undefined) {
                 this.config.camera_tilt_deg = this.config.camera_params.tilt_deg;
             } else {
@@ -36,8 +30,8 @@ class ConfigEditor extends HTMLElement {
 
         this.render();
         this.attachEventListeners();
+        this.updateShaderParams();
 
-        // Dispatch initial config to sync other components
         this.dispatchEvent(new CustomEvent('config-change', {
             detail: this.config,
             bubbles: true
@@ -59,6 +53,10 @@ class ConfigEditor extends HTMLElement {
                         <label class="form-label">Shader</label>
                         <input type="text" class="form-input" name="shader" value="${this.config.shader || ''}" placeholder="Select a shader from the browser">
                     </div>
+
+                    <!-- Shader Parameters Section (Dynamic) -->
+                    <div id="shader-params-container"></div>
+                    
                     <div class="form-group">
                         <label class="form-label">Output Directory</label>
                         <input type="text" class="form-input" name="output_dir" value="${this.config.output_dir || 'output'}">
@@ -98,15 +96,16 @@ class ConfigEditor extends HTMLElement {
                         <div>
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label class="form-label">Tiles X</label>
-                                    <input type="number" class="form-input" name="tiles_x" value="${this.config.tiles_x || 1}" min="1" max="16">
+                                    <label class="form-label">Tile Count X</label>
+                                    <input type="number" class="form-input" name="tiles_x" value="${this.config.tiles_x || 1}" min="1" max="64">
                                 </div>
                                 <div class="form-group">
-                                    <label class="form-label">Tiles Y</label>
-                                    <input type="number" class="form-input" name="tiles_y" value="${this.config.tiles_y || 1}" min="1" max="16">
+                                    <label class="form-label">Tile Count Y</label>
+                                    <input type="number" class="form-input" name="tiles_y" value="${this.config.tiles_y || 1}" min="1" max="64">
                                 </div>
                             </div>
-                            <p class="form-hint">Split render into tiles for very high resolutions. Total pixels = Width × Height × Tiles.</p>
+                            <p class="form-hint">Split image into X*Y tiles. Each tile renders a portion of the total Width x Height.</p>
+                            <div id="tile-info-display" class="form-hint" style="margin-top: 5px; font-weight: bold;"></div>
                         </div>
                     </details>
 
@@ -163,9 +162,110 @@ class ConfigEditor extends HTMLElement {
         `;
     }
 
+    async updateShaderParams() {
+        let shaderPath = this.config.shader;
+        const container = this.querySelector('#shader-params-container');
+        if (!shaderPath || !container) return;
+
+        // Strip shaders/ prefix for API call if present
+        if (shaderPath.startsWith('shaders/') || shaderPath.startsWith('shaders\\')) {
+            shaderPath = shaderPath.substring(8);
+        }
+
+        try {
+            const data = await api.getShader(shaderPath);
+            const params = data.metadata?.parameters || [];
+
+            if (params.length === 0) {
+                container.innerHTML = '';
+                return;
+            }
+
+            // Ensure storage exists
+            if (!this.config.shader_parameters) {
+                this.config.shader_parameters = {};
+            }
+
+            let html = `
+                <details class="config-section" open>
+                    <summary>Shader Parameters</summary>
+                    <div>
+            `;
+
+            params.forEach(p => {
+                const val = this.config.shader_parameters[p.name] !== undefined
+                    ? this.config.shader_parameters[p.name]
+                    : p.default;
+
+                html += `
+                    <div class="form-group">
+                        <label class="form-label">${p.label || p.name} (${p.min} - ${p.max})</label>
+                        <input type="${p.type === 'float' || p.type === 'int' ? 'number' : 'text'}" 
+                               class="form-input shader-param-input" 
+                               data-param-name="${p.name}"
+                               data-param-type="${p.type}"
+                               value="${val}" 
+                               step="${p.type === 'float' ? '0.01' : '1'}"
+                               min="${p.min}" 
+                               max="${p.max}">
+                    </div>
+                `;
+            });
+
+            html += `</div></details>`;
+            container.innerHTML = html;
+
+            container.querySelectorAll('.shader-param-input').forEach(input => {
+                input.addEventListener('change', (e) => {
+                    const name = e.target.dataset.paramName;
+                    const type = e.target.dataset.paramType;
+                    let val = e.target.value;
+
+                    if (type === 'float') val = parseFloat(val);
+                    else if (type === 'int') val = parseInt(val);
+
+                    this.config.shader_parameters[name] = val;
+                    this.saveToLocalStorage();
+                    this.dispatchEvent(new CustomEvent('config-change', { detail: this.config, bubbles: true }));
+                });
+            });
+
+        } catch (e) {
+            console.error("Error loading shader params:", e);
+        }
+    }
+
     attachEventListeners() {
+        // Tile calculation helper
+        const updateTileInfo = () => {
+            const w = parseInt(this.querySelector('input[name="width"]').value) || 0;
+            const h = parseInt(this.querySelector('input[name="height"]').value) || 0;
+            const tx = parseInt(this.querySelector('input[name="tiles_x"]').value) || 1;
+            const ty = parseInt(this.querySelector('input[name="tiles_y"]').value) || 1;
+
+            if (w && h && tx && ty) {
+                const tw = Math.ceil(w / tx);
+                const th = Math.ceil(h / ty);
+                const total = tx * ty;
+                const display = this.querySelector('#tile-info-display');
+                if (display) {
+                    let msg = `Total Tiles: ${total} | Tile Size: ${tw} x ${th} px`;
+                    if (total > 256) {
+                        msg += ' <span style="color: #ff4444;">(Warning: High tile count!)</span>';
+                    }
+                    if ((tw < 256 || th < 256) && total > 1) {
+                        msg += ' <span style="color: #ffaa00;">(Warning: Small tiles inefficient)</span>';
+                    }
+                    display.innerHTML = msg;
+                }
+            }
+        };
+
+        // Call once to init
+        updateTileInfo();
+
         // Form inputs - update config on change
-        this.querySelectorAll('input').forEach(input => {
+        this.querySelectorAll('input:not(.shader-param-input)').forEach(input => {
             input.addEventListener('change', (e) => {
                 const name = e.target.name;
                 let value = e.target.value;
@@ -177,7 +277,13 @@ class ConfigEditor extends HTMLElement {
                 // Store directly in config (no special nested handling needed)
                 this.config[name] = value;
                 this.saveToLocalStorage();
+                updateTileInfo();
                 this.dispatchEvent(new CustomEvent('config-change', { detail: this.config, bubbles: true }));
+
+                // Reload shader params if shader changes
+                if (name === 'shader') {
+                    this.updateShaderParams();
+                }
             });
         });
 

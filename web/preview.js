@@ -32,7 +32,7 @@ vec3 cameraDirLL180(vec2 uv, float tiltDeg, mat3 camBasis) {
   dirLocal.x = cos(lat) * sin(lon);
   dirLocal.y = sin(lat);
   dirLocal.z = cos(lat) * cos(lon);
-  float tiltRad = radians(tiltDeg);
+  float tiltRad = radians(-tiltDeg);
   float c = cos(tiltRad);
   float s = sin(tiltRad);
   mat3 tiltX = mat3(
@@ -129,9 +129,9 @@ function linkProgram(vsSrc, fsSrc) {
 function createFullscreenVAO(prog) {
   const vertices = new Float32Array([
     -1.0, -1.0, 0.0, 0.0,
-     1.0, -1.0, 1.0, 0.0,
-    -1.0,  1.0, 0.0, 1.0,
-     1.0,  1.0, 1.0, 1.0,
+    1.0, -1.0, 1.0, 0.0,
+    -1.0, 1.0, 0.0, 1.0,
+    1.0, 1.0, 1.0, 1.0,
   ]);
   const vbo = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, vbo);

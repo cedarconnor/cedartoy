@@ -185,6 +185,7 @@ def config_to_job(cfg: dict) -> RenderJob:
             "tilt_deg": cfg["camera_tilt_deg"],
             "ipd": cfg["camera_ipd"]
         },
+        shader_parameters=cfg.get("shader_parameters", {}),
         disk_streaming=cfg.get("disk_streaming"),
         multipass_graph=mp
     )

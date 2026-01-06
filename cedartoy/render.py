@@ -892,6 +892,10 @@ class Renderer:
             'iCameraDir': tuple(cam_dir),
             'iCameraUp': tuple(cam_up),
         }
+        
+        # Inject custom shader parameters
+        for k, v in self.job.shader_parameters.items():
+            uni[k] = v
 
         # Standard Shadertoy time/date uniforms
         now = datetime.now()

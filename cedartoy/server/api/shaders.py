@@ -199,6 +199,8 @@ def _parse_shader_metadata(shader_path: Path) -> Dict:
         with open(shader_path, 'r') as f:
             for line in f:
                 line = line.strip()
+                if not line:
+                    continue
                 if not line.startswith("//"):
                     break
 
@@ -208,6 +210,28 @@ def _parse_shader_metadata(shader_path: Path) -> Dict:
                     key = match.group(1).lower()
                     value = match.group(2).strip()
                     metadata[key] = value
+                
+                # Parse params: // @param name type default min max label
+                # Example: // @param speed float 1.0 0.0 5.0 "Speed Factor"
+                param_match = re.match(r'^//\s*@param\s+(\w+)\s+(\w+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+(.+)$', line)
+                if param_match:
+                    if "parameters" not in metadata:
+                        metadata["parameters"] = []
+                    
+                    p_name, p_type, p_def, p_min, p_max, p_label = param_match.groups()
+                    
+                    # Strip quotes from label if present
+                    if p_label.startswith('"') and p_label.endswith('"'):
+                        p_label = p_label[1:-1]
+                        
+                    metadata["parameters"].append({
+                        "name": p_name,
+                        "type": p_type,
+                        "default": float(p_def) if p_type == "float" else int(p_def),
+                        "min": float(p_min) if p_type == "float" else int(p_min),
+                        "max": float(p_max) if p_type == "float" else int(p_max),
+                        "label": p_label
+                    })
     except Exception:
         pass
 

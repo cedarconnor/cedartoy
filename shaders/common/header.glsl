@@ -56,7 +56,7 @@ vec3 cameraDirLL180(vec2 uv, float tiltDeg, mat3 camBasis) {
     dirLocal.y = sin(lat);
     dirLocal.z = cos(lat) * cos(lon);
 
-    float tiltRad = radians(tiltDeg);
+    float tiltRad = radians(-tiltDeg);
     float c = cos(tiltRad);
     float s = sin(tiltRad);
     mat3 tiltX = mat3(
