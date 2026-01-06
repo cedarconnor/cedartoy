@@ -1,11 +1,11 @@
 import { api } from './api.js';
-import './components/shader-browser.js';
-import './components/config-editor.js';
-import './components/preview-panel.js';
-import './components/audio-viz.js';
-import './components/render-panel.js';
-import './components/directory-browser.js';
-import './components/shader-editor.js';
+import './components/shader-browser.js?v=2';
+import './components/config-editor.js?v=2';
+import './components/preview-panel.js?v=2';
+import './components/audio-viz.js?v=2';
+import './components/render-panel.js?v=2';
+import './components/directory-browser.js?v=2';
+import './components/shader-editor.js?v=2';
 
 // Global app state
 window.cedartoy = {
@@ -34,6 +34,14 @@ document.addEventListener('shader-select', async (e) => {
         const shaderInput = configEditor.querySelector('input[name="shader"]');
         if (shaderInput) {
             shaderInput.value = fullPath;
+        }
+
+        // Refresh shader parameters UI
+        if (typeof configEditor.updateShaderParams === 'function') {
+            console.log('Calling configEditor.updateShaderParams() from app.js');
+            configEditor.updateShaderParams();
+        } else {
+            console.warn('configEditor.updateShaderParams is not a function');
         }
     }
 
