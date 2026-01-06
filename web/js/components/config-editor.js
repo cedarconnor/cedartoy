@@ -165,11 +165,7 @@ class ConfigEditor extends HTMLElement {
     async updateShaderParams() {
         let shaderPath = this.config.shader;
         const container = this.querySelector('#shader-params-container');
-        if (!shaderPath || !container) {
-            console.warn('updateShaderParams aborted:', { shaderPath, container: !!container });
-            return;
-        }
-        console.log('updateShaderParams calling for:', shaderPath);
+        if (!shaderPath || !container) return;
 
         // Strip shaders/ prefix for API call if present
         if (shaderPath.startsWith('shaders/') || shaderPath.startsWith('shaders\\')) {

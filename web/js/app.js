@@ -38,10 +38,7 @@ document.addEventListener('shader-select', async (e) => {
 
         // Refresh shader parameters UI
         if (typeof configEditor.updateShaderParams === 'function') {
-            console.log('Calling configEditor.updateShaderParams() from app.js');
             configEditor.updateShaderParams();
-        } else {
-            console.warn('configEditor.updateShaderParams is not a function');
         }
     }
 
