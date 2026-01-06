@@ -1,0 +1,6 @@
+width: 1280
+height: 720
+fps: 60
+duration: 10.0
+shader: shaders/sun.glsl
+output_dir: renders/sun

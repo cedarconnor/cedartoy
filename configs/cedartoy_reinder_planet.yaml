@@ -1,0 +1,8 @@
+# Cedartoy Configuration for Reinder Planet
+width: 1280
+height: 720
+fps: 60
+duration_sec: 10
+output_dir: renders/reinder_planet
+output_pattern: frame_{frame:05d}.png
+shader: shaders/reinder_planet.glsl

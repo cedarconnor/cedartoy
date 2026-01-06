@@ -1,0 +1,11 @@
+
+# Cedartoy Configuration for Seascape (Ms2SD1)
+width: 1280
+height: 720
+fps: 60
+duration_sec: 10
+output_dir: renders/seascape
+output_pattern: frame_{frame:05d}.png
+shutter: 0.5
+temporal_samples: 1
+shader: shaders/Ms2SD1_seascape.glsl

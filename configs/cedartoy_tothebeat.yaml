@@ -1,0 +1,19 @@
+# Cedartoy Configuration for To The Beat Shader
+width: 1280
+height: 720
+fps: 60
+duration_sec: 10
+output_dir: renders/tothebeat
+output_pattern: frame_{frame:05d}.png
+shader: shaders/tothebeat/image.glsl
+
+multipass:
+  buffers:
+    A:
+      shader: shaders/tothebeat/buffer_a.glsl
+      channels:
+        0: A
+    Image:
+      shader: shaders/tothebeat/image.glsl
+      channels:
+        0: A

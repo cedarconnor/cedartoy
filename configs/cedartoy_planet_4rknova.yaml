@@ -1,0 +1,10 @@
+# Cedartoy Configuration for Planet Shader
+width: 1280
+height: 720
+fps: 60
+duration_sec: 10
+output_dir: renders/planet_4rknova
+output_pattern: frame_{frame:05d}.png
+shutter: 0.5
+temporal_samples: 1
+shader: shaders/planet_4rknova.glsl

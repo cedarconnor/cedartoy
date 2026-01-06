@@ -1,0 +1,22 @@
+
+# Cedartoy Configuration for Brainfiller (lctGRB)
+width: 1280
+height: 720
+fps: 60
+duration_sec: 10
+output_dir: renders/brainfiller
+output_pattern: frame_{frame:05d}.png
+shutter: 0.5
+temporal_samples: 1
+shader: shaders/lctGRB_brainfiller_ported.glsl
+
+# Multipass Graph (Feedback Loop)
+# We define a single buffer "main" that outputs to screen.
+# It uses itself as input (feedback).
+multipass:
+  buffers:
+    main:
+      shader: shaders/lctGRB_brainfiller_ported.glsl
+      outputs_to_screen: true
+      channels:
+        iChannel0: main  # Feedback: iChannel0 reads from 'main' (previous frame)

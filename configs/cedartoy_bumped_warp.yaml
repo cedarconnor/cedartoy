@@ -1,0 +1,18 @@
+# Cedartoy Configuration for Bumped Warp
+width: 1280
+height: 720
+fps: 60
+duration_sec: 10
+output_dir: renders/bumped_warp
+output_pattern: frame_{frame:05d}.png
+shader: shaders/bumped_warp/image.glsl
+
+multipass:
+  buffers:
+    noise:
+        shader: shaders/bumped_warp/noise.glsl
+        outputs_to_screen: false
+    Image:
+        shader: shaders/bumped_warp/image.glsl
+        channels:
+            0: noise
