@@ -22,10 +22,49 @@ export class ShaderRenderer {
         // Camera controls (for CedarToy dome projection)
         this.cameraMode = 0; // 0=2D, 1=Equirect, 2=LL180
         this.cameraTilt = 0.0; // degrees
+
+        // Mouse tracking for iMouse uniform
+        this.mouseX = 0;
+        this.mouseY = 0;
+        this.mouseClickX = 0;
+        this.mouseClickY = 0;
+        this.mouseDown = false;
+
+        this._onMouseMove = (e) => {
+            const rect = this.canvas.getBoundingClientRect();
+            this.mouseX = (e.clientX - rect.left) * (this.canvas.width / rect.width);
+            this.mouseY = this.canvas.height - (e.clientY - rect.top) * (this.canvas.height / rect.height);
+        };
+        this._onMouseDown = (e) => {
+            this.mouseDown = true;
+            const rect = this.canvas.getBoundingClientRect();
+            this.mouseClickX = (e.clientX - rect.left) * (this.canvas.width / rect.width);
+            this.mouseClickY = this.canvas.height - (e.clientY - rect.top) * (this.canvas.height / rect.height);
+        };
+        this._onMouseUp = () => {
+            this.mouseDown = false;
+        };
+
+        this.canvas.addEventListener('mousemove', this._onMouseMove);
+        this.canvas.addEventListener('mousedown', this._onMouseDown);
+        this.canvas.addEventListener('mouseup', this._onMouseUp);
     }
 
     compileShader(source) {
         const gl = this.gl;
+
+        // Clean up previous program and shaders to prevent GPU resource leaks
+        if (this.program) {
+            const shaders = gl.getAttachedShaders(this.program);
+            if (shaders) {
+                shaders.forEach(s => {
+                    gl.detachShader(this.program, s);
+                    gl.deleteShader(s);
+                });
+            }
+            gl.deleteProgram(this.program);
+            this.program = null;
+        }
 
         // Vertex shader (fullscreen quad)
         const vertexShader = gl.createShader(gl.VERTEX_SHADER);
@@ -266,7 +305,11 @@ vec3 cameraDirLL180(vec2 uv, float tiltDeg, mat3 camBasis) {
         gl.uniform1f(this.uniforms.iTime, this.currentTime);
         gl.uniform1f(this.uniforms.iTimeDelta, 0.016); // ~60fps
         gl.uniform1i(this.uniforms.iFrame, this.frameCount);
-        gl.uniform4f(this.uniforms.iMouse, 0, 0, 0, 0); // TODO: mouse tracking
+        gl.uniform4f(this.uniforms.iMouse,
+            this.mouseX, this.mouseY,
+            this.mouseDown ? this.mouseClickX : 0,
+            this.mouseDown ? this.mouseClickY : 0
+        );
 
         // Set iDate (year, month, day, time in seconds)
         const now = new Date();

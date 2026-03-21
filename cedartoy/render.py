@@ -322,13 +322,64 @@ class Renderer:
         for pair in self.feedback_pairs.values():
             pair["index"] = 1 - int(pair["index"])
 
+    def cleanup(self):
+        """Release all GPU resources to prevent leaks."""
+        for tex in self.file_textures.values():
+            tex.release()
+        self.file_textures.clear()
+
+        if hasattr(self, 'audio_tex_512'):
+            self.audio_tex_512.release()
+
+        if self.history_tex:
+            self.history_tex.release()
+            self.history_tex = None
+
+        for name, pair in self.feedback_pairs.items():
+            for tex in pair.get("textures", []):
+                tex.release()
+            for fbo in pair.get("fbos", []):
+                fbo.release()
+        self.feedback_pairs.clear()
+
+        for fbo in self.fbos.values():
+            if fbo not in [f for p in self.feedback_pairs.values() for f in p.get("fbos", [])]:
+                fbo.release()
+        self.fbos.clear()
+
+        for tex in self.textures.values():
+            tex.release()
+        self.textures.clear()
+
+        for vao in self.vaos.values():
+            vao.release()
+        self.vaos.clear()
+
+        for prog in self.programs.values():
+            prog.release()
+        self.programs.clear()
+
+        if hasattr(self, 'vbo') and self.vbo:
+            self.vbo.release()
+
+        if self.ctx:
+            self.ctx.release()
+            self.ctx = None
+
+    def __del__(self):
+        try:
+            if self.ctx is not None:
+                self.cleanup()
+        except Exception:
+            pass
+
     def _bind_uniforms(self, prog, uniforms: Dict[str, Any]):
         for k, v in uniforms.items():
             if k in prog:
                 try:
                     prog[k].value = v
                 except Exception as e:
-                    pass
+                    print(f"[LOG] WARNING: Failed to set uniform '{k}': {e}", file=sys.stderr, flush=True)
 
     def _get_file_texture(self, path: Path) -> moderngl.Texture:
         if path in self.file_textures:

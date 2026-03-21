@@ -58,6 +58,13 @@ class PreviewPanel extends HTMLElement {
         });
     }
 
+    disconnectedCallback() {
+        if (this._updateInterval) {
+            clearInterval(this._updateInterval);
+            this._updateInterval = null;
+        }
+    }
+
     render() {
         this.innerHTML = `
             <div class="preview-container">
@@ -165,7 +172,7 @@ class PreviewPanel extends HTMLElement {
         });
 
         // Update slider during playback
-        setInterval(() => {
+        this._updateInterval = setInterval(() => {
             if (this.playing && this.renderer) {
                 const progress = (this.renderer.currentTime / this.duration) * 1000;
                 timeSlider.value = Math.min(progress, 1000);

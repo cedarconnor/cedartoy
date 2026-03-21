@@ -52,11 +52,20 @@ async def cancel_render():
         raise HTTPException(status_code=404, detail="No active render")
 
     if render_state["process"]:
-        import signal
-        render_state["process"].send_signal(signal.SIGTERM)
+        render_state["process"].terminate()
+
+    # Clean up temp config file
+    config_file = render_state.get("config_file")
+    if config_file:
+        import os
+        try:
+            os.unlink(config_file)
+        except OSError:
+            pass
 
     render_state["active"] = False
     render_state["process"] = None
+    render_state["config_file"] = None
 
     return {"status": "cancelled"}
 

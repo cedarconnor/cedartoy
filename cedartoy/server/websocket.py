@@ -122,8 +122,11 @@ async def handle_render(websocket: WebSocket, data):
                 "message": f"Render process exited with code {return_code}"
             })
 
+        # Clean up temp config file
+        _cleanup_config_file(config_file)
         render_state["active"] = False
         render_state["process"] = None
+        render_state["config_file"] = None
 
     except Exception as e:
         import traceback
@@ -132,8 +135,21 @@ async def handle_render(websocket: WebSocket, data):
             "type": "render_error",
             "message": f"Render error: {str(e)}"
         })
+        # Clean up temp config file on error too
+        _cleanup_config_file(config_file)
         render_state["active"] = False
         render_state["process"] = None
+        render_state["config_file"] = None
+
+
+def _cleanup_config_file(config_file: Optional[str]):
+    """Remove temporary config file if it exists."""
+    if config_file:
+        import os
+        try:
+            os.unlink(config_file)
+        except OSError:
+            pass
 
 async def process_log_line(websocket: WebSocket, line: str):
     """Process a single log line from render output"""
