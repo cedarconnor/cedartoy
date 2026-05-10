@@ -181,10 +181,10 @@ def config_to_job(cfg: dict) -> RenderJob:
         camera_mode=cfg["camera_mode"],
         camera_stereo=cfg["camera_stereo"],
         camera_fov=cfg["camera_fov"],
-        camera_params={
+        camera_params=cfg.get("camera_params", {
             "tilt_deg": cfg["camera_tilt_deg"],
-            "ipd": cfg["camera_ipd"]
-        },
+            "ipd": cfg["camera_ipd"],
+        }),
         shader_parameters=cfg.get("shader_parameters", {}),
         disk_streaming=cfg.get("disk_streaming"),
         multipass_graph=mp
