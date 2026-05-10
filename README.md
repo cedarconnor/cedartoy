@@ -1,10 +1,10 @@
 # CedarToy
 
-> **Status**: v0.3.1 (Active Development) - Web UI & Generic Parameters Added.
+> **Status**: v0.3.2 (Active Development) - Production reliability pass added.
 
 **CedarToy** is a headless, high-quality GLSL shader renderer designed for generative art, video production, and VR/dome content. It is compatible with Shadertoy shader syntax and extends it with advanced features like high-resolution tiling, temporal supersampling (motion blur), and VR180/Equirectangular camera mappings.
 
-Newly added is a **Web UI** for interactive configuration and a **Generic Parameter System** for exposing shader uniforms dynamically.
+The Web UI supports interactive configuration, dynamic shader parameters, render job tracking, preflight diagnostics, and output artifact summaries.
 
 ## Key Features
 
@@ -13,6 +13,11 @@ Newly added is a **Web UI** for interactive configuration and a **Generic Parame
   - **Real-time Configuration**: Adjust resolution, tiled rendering settings, and camera modes.
   - **Dynamic Shader Parameters**: Automatically parse and expose custom shader uniforms.
   - **Shader Browser**: Browse and select shaders from your library.
+  - **Render Job Tracking**: Each UI render gets a job ID with retained progress, logs, completion state, and output artifacts.
+- **Production Reliability**:
+  - **Typed Configuration**: YAML/JSON configs are normalized and validated before rendering.
+  - **Preflight Diagnostics**: Missing shaders, invalid output paths, and high memory estimates are reported before long renders start.
+  - **Artifact Discovery**: Completed UI jobs list generated frames from the configured output directory.
 - **High-Quality Rendering**: 
   - **Tile-based rendering** for massive resolutions (4K, 8K, 16K+).
   - **Temporal Supersampling** for high-quality motion blur.
@@ -53,6 +58,7 @@ Open **http://localhost:8080** in your browser.
 - **Configure**: Set resolution, FPS, and Camera Mode.
 - **Tweak Parameters**: Adjust "Shader Parameters" (e.g., Audio Strength) directly in the UI.
 - **Render**: Click "Start Render" to generate output images.
+  - The UI queues a render job, streams progress over WebSocket, and shows generated artifacts when the job completes.
 
 ### 2. Render from CLI
 Render a shader source file to a sequence of PNGs directly from the command line.
@@ -87,3 +93,4 @@ Detailed documentation is available in the `docs/` directory:
 
 - [User Guide](docs/USER_GUIDE.md) - CLI usage, configuration options, and camera modes.
 - [Audio System](docs/AUDIO_SYSTEM.md) - Details on FFT, waveforms, and history textures.
+- [Developer Guide](docs/DEVELOPER.md) - Architecture notes, render job lifecycle, and reliability extension points.
