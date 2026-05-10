@@ -182,3 +182,11 @@ tiles_y: 4
 This splits the render into 16 tiles of 1920x1080 each.
 
 *Note: Temporal supersampling applies to each tile individually before stitching (or saving).*
+
+## Render Reliability
+
+The Web UI assigns every render a job ID. Progress, logs, completion state, and output artifacts are tracked against that job ID, so a render can be inspected after it finishes or fails.
+
+Before a render starts, CedarToy runs preflight checks. Errors block the render, while warnings are shown in the render logs and allow the render to continue. Common warnings include high estimated memory use for large untiled renders.
+
+Completed jobs list generated image artifacts from the configured output directory. For long sequences, only the first artifacts are shown in the UI summary; the full output remains in the configured output directory.

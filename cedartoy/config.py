@@ -1,5 +1,4 @@
 import json
-import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 import sys
@@ -10,6 +9,7 @@ except ImportError:
     yaml = None
 
 from .options_schema import OPTIONS
+from .config_model import normalize_config
 
 def load_defaults() -> Dict[str, Any]:
     defaults = {}
@@ -50,5 +50,6 @@ def build_config(config_path: Optional[Path] = None, cli_args: Optional[Dict[str
         
     if cli_args:
         cfg = merge_configs(cfg, cli_args)
-        
-    return cfg
+
+    normalized = normalize_config(cfg)
+    return normalized.to_runtime_dict()
