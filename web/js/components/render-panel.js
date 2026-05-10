@@ -8,6 +8,9 @@ class RenderPanel extends HTMLElement {
         this.progress = { frame: 0, total: 0, eta_sec: 0, elapsed_sec: 0 };
         this.logs = [];
         this.outputDir = null;
+        this.jobId = null;
+        this.artifacts = [];
+        this.diagnostics = null;
     }
 
     async connectedCallback() {
@@ -61,6 +64,14 @@ class RenderPanel extends HTMLElement {
                     <div style="margin-top: 8px; color: var(--success); font-weight: 500;">
                         ✓ Render complete! ${this.progress.frame} frames rendered
                         ${this.outputDir ? `<button class="btn btn-secondary" id="open-output" style="margin-left: 8px;">Open Folder</button>` : ''}
+                    </div>
+                ` : ''}
+
+                ${this.artifacts.length > 0 ? `
+                    <div class="render-artifacts" style="margin-top: 8px; font-size: 0.85rem;">
+                        ${this.artifacts.slice(0, 10).map(item => `
+                            <div>${this.escapeHtml(item.name)} (${Math.round(item.size / 1024)} KB)</div>
+                        `).join('')}
                     </div>
                 ` : ''}
 
@@ -125,6 +136,9 @@ class RenderPanel extends HTMLElement {
         this.logs = [];
         this.progress = { frame: 0, total: 0, eta_sec: 0, elapsed_sec: 0 };
         this.outputDir = null;
+        this.jobId = null;
+        this.artifacts = [];
+        this.diagnostics = null;
         this.render();
 
         this.addLog('Starting render...');
@@ -132,12 +146,15 @@ class RenderPanel extends HTMLElement {
         try {
             // Start render via API
             const result = await api.startRender(config);
+            this.jobId = result.job_id;
+            this.diagnostics = result.diagnostics;
+            this.addLog(`Queued render job: ${this.jobId}`);
             this.addLog(`Config saved to: ${result.config_file}`);
 
             // Send WebSocket message to start rendering
             wsClient.send({
                 type: 'start_render',
-                config_file: result.config_file
+                job_id: this.jobId
             });
 
         } catch (err) {
@@ -151,9 +168,13 @@ class RenderPanel extends HTMLElement {
         this.addLog('Cancelling render...');
 
         try {
-            await api.cancelRender();
+            if (!this.jobId) {
+                this.addLog('No active job to cancel');
+                return;
+            }
+            await api.cancelRender(this.jobId);
             this.state = 'idle';
-            this.addLog('Render cancelled');
+            this.addLog(`Render cancelled: ${this.jobId}`);
             this.render();
         } catch (err) {
             this.addLog(`Failed to cancel: ${err.message}`);
@@ -170,7 +191,7 @@ class RenderPanel extends HTMLElement {
             this.addLog(data.message);
         });
 
-        wsClient.on('render_complete', (data) => {
+        wsClient.on('render_complete', async (data) => {
             this.state = 'complete';
             if (data.output_dir) {
                 this.outputDir = data.output_dir;
@@ -178,6 +199,16 @@ class RenderPanel extends HTMLElement {
             } else {
                 this.addLog('✓ Render complete!');
             }
+            if (this.jobId) {
+                const artifacts = await api.listRenderArtifacts(this.jobId);
+                this.artifacts = artifacts.artifacts || [];
+            }
+            this.render();
+        });
+
+        wsClient.on('render_cancelled', (data) => {
+            this.state = 'idle';
+            this.addLog(`Render cancelled: ${data.job_id || this.jobId}`);
             this.render();
         });
 

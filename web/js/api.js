@@ -94,23 +94,32 @@ export const api = {
         return await res.json();
     },
 
-    // Render (placeholder for Phase 2)
+    // Render
     async startRender(config) {
         const res = await fetch(`${API_BASE}/render/start`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ config })
         });
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(JSON.stringify(data.detail || data));
+        }
+        return data;
+    },
+
+    async cancelRender(jobId) {
+        const res = await fetch(`${API_BASE}/render/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' });
         return await res.json();
     },
 
-    async cancelRender() {
-        const res = await fetch(`${API_BASE}/render/cancel`, { method: 'POST' });
+    async getRenderStatus(jobId) {
+        const res = await fetch(`${API_BASE}/render/${encodeURIComponent(jobId)}/status`);
         return await res.json();
     },
 
-    async getRenderStatus() {
-        const res = await fetch(`${API_BASE}/render/status`);
+    async listRenderArtifacts(jobId) {
+        const res = await fetch(`${API_BASE}/render/${encodeURIComponent(jobId)}/artifacts`);
         return await res.json();
     }
 };
