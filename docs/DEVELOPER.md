@@ -46,3 +46,11 @@ The CLI supports Shadertoy‑style multipass graphs via `multipass.buffers` in Y
 1. Check `imageio` capabilities.
 2. Update `cedartoy.options_schema` to allow the format in the wizard.
 3. Update `cedartoy.render` to handle specific bit-depth conversions if `imageio` needs hints (e.g. for EXR).
+
+## Production Reliability Architecture
+
+Validated user configuration is owned by `cedartoy.config_model.CedarToyConfig`. File loading remains in `cedartoy.config`, but callers should treat raw dictionaries as untrusted until they pass through `normalize_config()`.
+
+Render job lifecycle state is owned by `cedartoy.server.jobs.RenderJobManager`. API and WebSocket modules should not maintain their own global process state. The manager records job ID, status, progress, retained logs, final result, errors, and output artifacts.
+
+Preflight checks live in `cedartoy.diagnostics`. These checks run before a UI render job is queued so missing shaders, invalid output paths, and risky memory estimates are reported before the renderer creates an OpenGL context.
