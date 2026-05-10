@@ -5,6 +5,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from cedartoy.diagnostics import run_preflight_checks
 from cedartoy.server.jobs import RenderJobManager
 
 
@@ -19,8 +20,16 @@ class RenderConfig(BaseModel):
 @router.post("/start")
 async def start_render(data: RenderConfig):
     """Create a render job and write its normalized config to a temp file."""
+    diagnostics = run_preflight_checks(data.config)
+    if not diagnostics.ok:
+        raise HTTPException(status_code=400, detail=diagnostics.to_dict())
     job = job_manager.create_job(data.config)
-    return {"status": "queued", "job_id": job.id, "config_file": str(job.config_file)}
+    return {
+        "status": "queued",
+        "job_id": job.id,
+        "config_file": str(job.config_file),
+        "diagnostics": diagnostics.to_dict(),
+    }
 
 
 @router.post("/{job_id}/cancel")
