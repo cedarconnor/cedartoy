@@ -116,6 +116,36 @@ def load_bundle(path: Path) -> MusiCueBundle:
         raise ValueError(f"Bundle {path} failed validation: {exc}") from exc
 
 
+_DEFAULT_ADSR = (0.0, 0.08, 0.0, 0.0)
+# Attack=0 (instantaneous): visual impulses are sub-frame flashes; ramping
+# from 0 over 5ms means a frame landing exactly on an event sees 0.
+
+
+def _adsr_value(t_since: float, adsr: Tuple[float, float, float, float], strength: float) -> float:
+    if t_since < 0:
+        return 0.0
+    a, d, s, _r = adsr
+    if t_since < a:
+        return strength * (t_since / a) if a > 0 else strength
+    if t_since < a + d:
+        progress = (t_since - a) / d if d > 0 else 1.0
+        return strength * (1.0 - progress * (1.0 - s))
+    return strength * s
+
+
+def _sample_curve(curve: "StemEnergyCurve", t: float) -> float:
+    if not curve.values or curve.hop_sec <= 0:
+        return 0.0
+    idx_f = t / curve.hop_sec
+    i0 = int(idx_f)
+    if i0 < 0:
+        return float(curve.values[0])
+    if i0 >= len(curve.values) - 1:
+        return float(curve.values[-1])
+    frac = idx_f - i0
+    return float(curve.values[i0]) * (1.0 - frac) + float(curve.values[i0 + 1]) * frac
+
+
 @dataclass
 class EvalFrame:
     bpm: float = 0.0
@@ -142,6 +172,10 @@ class BundleEvaluator:
             bundle.tempo.time_signature[0]
             if bundle.tempo.time_signature else 4
         )
+        self._drums: Dict[str, List[Tuple[float, float]]] = {
+            cls: sorted([(o.t, o.strength) for o in events], key=lambda e: e[0])
+            for cls, events in bundle.drums.items()
+        }
 
     def _beat_phase_at(self, t: float) -> float:
         times = self._beat_times
@@ -167,10 +201,35 @@ class BundleEvaluator:
         bps = self._bpm_global / 60.0
         return int(t * bps / max(1, self._beats_per_bar))
 
+    def _section_energy_at(self, t: float) -> float:
+        for sec in self._sections:
+            if sec.start <= t < sec.end:
+                return sec.energy_rank
+        return 0.0
+
+    def _drum_pulses_at(self, t: float) -> Dict[str, float]:
+        out: Dict[str, float] = {}
+        for cls, events in self._drums.items():
+            value = 0.0
+            for event_t, strength in events:
+                if event_t > t:
+                    break
+                value += _adsr_value(t - event_t, _DEFAULT_ADSR, strength)
+            out[cls] = min(1.0, max(0.0, value))
+        return out
+
+    def _curve_dict_at(self, curves: Dict[str, "StemEnergyCurve"], t: float) -> Dict[str, float]:
+        return {k: _sample_curve(v, t) for k, v in curves.items()}
+
     def evaluate(self, frame_index: int) -> EvalFrame:
         t = frame_index / self.fps
         return EvalFrame(
             bpm=self._bpm_global,
             beat_phase=self._beat_phase_at(t),
             bar=self._bar_at(t),
+            section_energy=self._section_energy_at(t),
+            global_energy=_sample_curve(self.bundle.global_energy, t),
+            drum_pulses=self._drum_pulses_at(t),
+            midi_energy=self._curve_dict_at(self.bundle.midi_energy, t),
+            stems_energy=self._curve_dict_at(self.bundle.stems_energy, t),
         )
