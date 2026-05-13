@@ -131,6 +131,50 @@ class ConfigEditor extends HTMLElement {
                         </div>
                     </details>
 
+                    <!-- Audio + MusiCue Bundle Section -->
+                    <details class="config-section" open>
+                        <summary>Audio &amp; MusiCue Bundle</summary>
+                        <div>
+                            <div class="form-group">
+                                <label class="form-label">Audio Path</label>
+                                <input type="text" class="form-input" name="audio_path"
+                                       value="${this.config.audio_path || ''}"
+                                       placeholder="absolute/path/to/song.wav">
+                                <p class="form-hint">For bundle auto-discovery, point at the real file (not an upload). CedarToy looks for <code>&lt;stem&gt;.musicue.json</code> as a sibling.</p>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Audio Mode</label>
+                                <select class="form-input" name="audio_mode">
+                                    <option value="both" ${this.config.audio_mode === 'both' ? 'selected' : ''}>Both (FFT + History)</option>
+                                    <option value="shadertoy" ${this.config.audio_mode === 'shadertoy' ? 'selected' : ''}>Shadertoy (iChannel0 only)</option>
+                                    <option value="history" ${this.config.audio_mode === 'history' ? 'selected' : ''}>History only</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Bundle Mode</label>
+                                <select class="form-input" name="bundle_mode" id="bundle-mode-select">
+                                    <option value="auto" ${(this.config.bundle_mode ?? 'auto') === 'auto' ? 'selected' : ''}>Auto (cued when bundle present)</option>
+                                    <option value="raw" ${this.config.bundle_mode === 'raw' ? 'selected' : ''}>Raw (FFT amplitude)</option>
+                                    <option value="cued" ${this.config.bundle_mode === 'cued' ? 'selected' : ''}>Cued (synthesized from bundle)</option>
+                                    <option value="blend" ${this.config.bundle_mode === 'blend' ? 'selected' : ''}>Blend</option>
+                                </select>
+                            </div>
+                            <div class="form-group" id="bundle-blend-group" style="display: ${this.config.bundle_mode === 'blend' ? 'block' : 'none'};">
+                                <label class="form-label">Bundle Blend (0-1)</label>
+                                <input type="number" class="form-input" name="bundle_blend"
+                                       value="${this.config.bundle_blend ?? 0.5}"
+                                       min="0" max="1" step="0.05">
+                                <p class="form-hint">Mix weight applied to the cued texture in blend mode.</p>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Bundle Path (optional override)</label>
+                                <input type="text" class="form-input" name="bundle_path"
+                                       value="${this.config.bundle_path || ''}"
+                                       placeholder="leave empty for sibling auto-discovery">
+                            </div>
+                        </div>
+                    </details>
+
                     <!-- Output Format Section -->
                     <details class="config-section">
                         <summary>Output Format</summary>
@@ -296,6 +340,13 @@ class ConfigEditor extends HTMLElement {
                 this.config[name] = value;
                 this.saveToLocalStorage();
                 this.dispatchEvent(new CustomEvent('config-change', { detail: this.config, bubbles: true }));
+
+                if (name === 'bundle_mode') {
+                    const blendGroup = this.querySelector('#bundle-blend-group');
+                    if (blendGroup) {
+                        blendGroup.style.display = value === 'blend' ? 'block' : 'none';
+                    }
+                }
             });
         });
 
