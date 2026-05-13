@@ -288,3 +288,44 @@ class MusicalSpectrumSynth:
         )
         tex[1, :] = max(0.0, min(1.0, wave))
         return tex
+
+
+@dataclass
+class BundleLoadResult:
+    bundle: Optional[MusiCueBundle] = None
+    path: Optional[Path] = None
+    sha_match: bool = False
+
+
+def discover_bundle_path(audio_path: Path) -> Optional[Path]:
+    """Return sibling ``<audio_stem>.musicue.json`` if it exists."""
+    candidate = audio_path.with_suffix("").with_suffix(".musicue.json")
+    return candidate if candidate.exists() else None
+
+
+def compute_audio_sha256(audio_path: Path) -> str:
+    h = hashlib.sha256()
+    with open(audio_path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def load_for_audio(
+    audio_path: Path,
+    override_path: Optional[Path] = None,
+) -> BundleLoadResult:
+    target = override_path if override_path is not None else discover_bundle_path(audio_path)
+    if target is None:
+        _logger.info("No MusiCue bundle for %s; rendering with raw FFT.", audio_path)
+        return BundleLoadResult()
+
+    bundle = load_bundle(target)
+    audio_sha = compute_audio_sha256(audio_path)
+    sha_match = bundle.source_sha256 == audio_sha
+    if not sha_match:
+        _logger.warning(
+            "Bundle %s sha256=%s does not match audio %s sha=%s; using anyway.",
+            target, bundle.source_sha256, audio_path, audio_sha,
+        )
+    return BundleLoadResult(bundle=bundle, path=target, sha_match=sha_match)
