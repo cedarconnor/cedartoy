@@ -78,6 +78,13 @@ OPTIONS.append(Option(
 # --- Audio ---
 OPTIONS.append(Option("audio_path", "Audio Path", "path", None))
 OPTIONS.append(Option("audio_mode", "Audio Mode", "choice", "both", choices=["shadertoy", "history", "both"]))
+OPTIONS.append(Option("bundle_path", "Bundle Path", "path", None,
+    help_text="Path to a MusiCue bundle JSON (defaults to sibling of audio_path)."))
+OPTIONS.append(Option("bundle_mode", "Bundle Mode", "choice", "auto",
+    choices=["auto", "raw", "cued", "blend"],
+    help_text="auto=cued when bundle present; raw=ignore; cued=synthesized; blend=mix"))
+OPTIONS.append(Option("bundle_blend", "Bundle Blend (0-1)", "float", 0.5,
+    help_text="Mix weight for cued texture when bundle_mode='blend'"))
 
 # --- Camera ---
 OPTIONS.append(Option("camera_mode", "Camera Mode", "choice", "2d", choices=["2d", "equirect", "ll180"]))

@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 CameraMode = Literal["2d", "equirect", "ll180"]
 StereoMode = Literal["none", "sbs", "tb"]
 AudioMode = Literal["shadertoy", "history", "both"]
+BundleMode = Literal["auto", "raw", "cued", "blend"]
 OutputFormat = Literal["png", "exr"]
 BitDepth = Literal["8", "16f", "32f"]
 
@@ -30,6 +31,9 @@ class CedarToyConfig(BaseModel):
     default_bit_depth: BitDepth = "8"
     audio_path: Optional[Path] = None
     audio_mode: AudioMode = "both"
+    bundle_path: Optional[Path] = None
+    bundle_mode: BundleMode = "auto"
+    bundle_blend: float = 0.5
     camera_mode: CameraMode = "2d"
     camera_stereo: StereoMode = "none"
     camera_fov: float = 90.0
@@ -76,6 +80,13 @@ class CedarToyConfig(BaseModel):
     def shutter_range(cls, value: float):
         if value < 0 or value > 1:
             raise ValueError("shutter must be between 0 and 1")
+        return value
+
+    @field_validator("bundle_blend")
+    @classmethod
+    def _bundle_blend_in_unit_range(cls, value: float) -> float:
+        if value < 0 or value > 1:
+            raise ValueError("bundle_blend must be between 0 and 1")
         return value
 
     @property

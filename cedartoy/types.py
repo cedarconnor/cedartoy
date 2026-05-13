@@ -75,3 +75,8 @@ class RenderJob:
     
     # generic parameters
     shader_parameters: Dict[str, Any] = field(default_factory=dict)
+
+    # MusiCue bundle integration
+    bundle_path: Optional[Path] = None
+    bundle_mode: str = "auto"
+    bundle_blend: float = 0.5

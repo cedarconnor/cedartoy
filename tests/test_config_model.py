@@ -39,6 +39,33 @@ def test_rejects_invalid_render_dimensions():
         CedarToyConfig(shader=Path("shaders/test.glsl"), height=-1)
 
 
+def test_bundle_fields_have_safe_defaults():
+    cfg = CedarToyConfig(shader=Path("shaders/test.glsl"))
+    assert cfg.bundle_path is None
+    assert cfg.bundle_mode == "auto"
+    assert cfg.bundle_blend == 0.5
+
+
+def test_bundle_path_accepts_explicit_path():
+    cfg = CedarToyConfig(
+        shader=Path("shaders/test.glsl"),
+        bundle_path=Path("song.musicue.json"),
+    )
+    assert cfg.bundle_path == Path("song.musicue.json")
+
+
+def test_bundle_mode_rejects_unknown():
+    with pytest.raises(ValueError):
+        CedarToyConfig(shader=Path("shaders/test.glsl"), bundle_mode="bogus")
+
+
+def test_bundle_blend_must_be_in_unit_range():
+    with pytest.raises(ValueError, match="bundle_blend"):
+        CedarToyConfig(shader=Path("shaders/test.glsl"), bundle_blend=1.5)
+    with pytest.raises(ValueError, match="bundle_blend"):
+        CedarToyConfig(shader=Path("shaders/test.glsl"), bundle_blend=-0.1)
+
+
 def test_preserves_nested_multipass_config():
     raw = {
         "shader": "shaders/test.glsl",
