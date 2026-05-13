@@ -205,6 +205,26 @@ class Renderer:
                     dtype='f4'
                 )
 
+        # MusiCue bundle integration
+        self.bundle_eval = None
+        self.spectrum_synth = None
+        self.bundle_mode = getattr(job, "bundle_mode", "auto")
+        self.bundle_blend = getattr(job, "bundle_blend", 0.5)
+
+        if self.audio and self.bundle_mode != "raw" and job.audio_path is not None:
+            from .musicue import BundleEvaluator, MusicalSpectrumSynth, load_for_audio
+            result = load_for_audio(
+                job.audio_path,
+                override_path=getattr(job, "bundle_path", None),
+            )
+            if result.bundle is not None:
+                self.bundle_eval = BundleEvaluator(result.bundle, fps=job.fps)
+                self.spectrum_synth = MusicalSpectrumSynth()
+                if self.bundle_mode == "auto":
+                    self.bundle_mode = "cued"
+            elif self.bundle_mode == "auto":
+                self.bundle_mode = "raw"
+
         self.programs = {} 
         self.textures = {} 
         self.fbos = {}     
@@ -993,15 +1013,27 @@ class Renderer:
         ch_time = [0.0, 0.0, 0.0, 0.0]
         ch_res = [(0.0, 0.0, 0.0)] * 4
 
+        eval_frame = None
         if self.audio:
             uni['iSampleRate'] = float(self.audio.meta.sample_rate)
             if self.job.audio_mode in ("shadertoy", "both"):
-                aud_data = self.audio.get_shadertoy_texture(frame_idx)
+                raw_aud = self.audio.get_shadertoy_texture(frame_idx)
+                if self.bundle_eval is not None and self.spectrum_synth is not None:
+                    eval_frame = self.bundle_eval.evaluate(frame_idx)
+                    cued_aud = self.spectrum_synth.synthesize(eval_frame)
+                    aud_data = _mix_audio_textures(
+                        raw_aud, cued_aud, self.bundle_mode, self.bundle_blend,
+                    )
+                else:
+                    aud_data = raw_aud
                 if not hasattr(self, 'audio_tex_512'):
                     self.audio_tex_512 = self.ctx.texture((512, 2), 1, dtype='f4')
                 self.audio_tex_512.write(aud_data.astype('f4').tobytes())
         else:
             uni['iSampleRate'] = 0.0
+
+        # Built-in cuesheet/bundle uniforms (Phase 1)
+        uni.update(_builtin_uniforms_from_eval(eval_frame))
 
         if self.history_tex:
             self.history_tex.use(location=4)
