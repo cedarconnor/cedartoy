@@ -233,3 +233,58 @@ class BundleEvaluator:
             midi_energy=self._curve_dict_at(self.bundle.midi_energy, t),
             stems_energy=self._curve_dict_at(self.bundle.stems_energy, t),
         )
+
+
+_BIN_RANGES = {
+    "low":     (0, 32),
+    "low_mid": (32, 96),
+    "mid_hi":  (96, 256),
+    "high":    (256, 512),
+}
+
+
+def _hann_envelope(width: int) -> np.ndarray:
+    if width <= 0:
+        return np.zeros(0, dtype=np.float32)
+    if width == 1:
+        return np.array([1.0], dtype=np.float32)
+    return np.hanning(width).astype(np.float32)
+
+
+class MusicalSpectrumSynth:
+    """Synthesize a 2x512 iChannel0 texture from an EvalFrame."""
+
+    def __init__(self) -> None:
+        self._envelopes = {
+            name: _hann_envelope(end - start)
+            for name, (start, end) in _BIN_RANGES.items()
+        }
+
+    def _add_range(self, row: np.ndarray, name: str, weight: float) -> None:
+        if weight <= 0:
+            return
+        s, e = _BIN_RANGES[name]
+        row[s:e] += self._envelopes[name] * weight
+
+    def synthesize(self, frame: EvalFrame) -> np.ndarray:
+        tex = np.zeros((2, 512), dtype=np.float32)
+        row0 = tex[0]
+
+        low = frame.drum_pulses.get("kick", 0.0)
+        low_mid = frame.drum_pulses.get("snare", 0.0) + frame.drum_pulses.get("tom", 0.0)
+        mid_hi = frame.drum_pulses.get("hat", 0.0) + frame.drum_pulses.get("cymbal", 0.0)
+        high = frame.midi_energy.get("vocals", 0.0) + frame.midi_energy.get("other", 0.0)
+
+        self._add_range(row0, "low", low)
+        self._add_range(row0, "low_mid", low_mid)
+        self._add_range(row0, "mid_hi", mid_hi)
+        self._add_range(row0, "high", high)
+
+        row0 += 0.1 * float(frame.section_energy)
+        np.clip(row0, 0.0, 1.0, out=row0)
+
+        wave = 0.5 + 0.5 * float(frame.global_energy) * math.sin(
+            2.0 * math.pi * float(frame.beat_phase)
+        )
+        tex[1, :] = max(0.0, min(1.0, wave))
+        return tex
