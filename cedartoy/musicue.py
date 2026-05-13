@@ -114,3 +114,63 @@ def load_bundle(path: Path) -> MusiCueBundle:
         return MusiCueBundle.model_validate(data)
     except ValidationError as exc:
         raise ValueError(f"Bundle {path} failed validation: {exc}") from exc
+
+
+@dataclass
+class EvalFrame:
+    bpm: float = 0.0
+    beat_phase: float = 0.0
+    bar: int = 0
+    section_energy: float = 0.0
+    global_energy: float = 0.0
+    drum_pulses: Dict[str, float] = field(default_factory=dict)
+    midi_energy: Dict[str, float] = field(default_factory=dict)
+    stems_energy: Dict[str, float] = field(default_factory=dict)
+
+
+class BundleEvaluator:
+    def __init__(self, bundle: MusiCueBundle, fps: float):
+        if fps <= 0:
+            raise ValueError("fps must be positive")
+        self.bundle = bundle
+        self.fps = fps
+        self._bpm_global = bundle.tempo.bpm_global
+        self._beat_times = [b.t for b in bundle.beats]
+        self._downbeats = [(b.t, b.bar) for b in bundle.beats if b.is_downbeat]
+        self._sections = sorted(bundle.sections, key=lambda s: s.start)
+        self._beats_per_bar = (
+            bundle.tempo.time_signature[0]
+            if bundle.tempo.time_signature else 4
+        )
+
+    def _beat_phase_at(self, t: float) -> float:
+        times = self._beat_times
+        if len(times) < 2:
+            return 0.0
+        idx = bisect.bisect_right(times, t) - 1
+        if idx < 0 or idx >= len(times) - 1:
+            return 0.0
+        span = times[idx + 1] - times[idx]
+        if span <= 0:
+            return 0.0
+        return max(0.0, min(1.0, (t - times[idx]) / span))
+
+    def _bar_at(self, t: float) -> int:
+        if self._downbeats:
+            bar = 0
+            for time_t, b in self._downbeats:
+                if time_t <= t:
+                    bar = b
+                else:
+                    break
+            return bar
+        bps = self._bpm_global / 60.0
+        return int(t * bps / max(1, self._beats_per_bar))
+
+    def evaluate(self, frame_index: int) -> EvalFrame:
+        t = frame_index / self.fps
+        return EvalFrame(
+            bpm=self._bpm_global,
+            beat_phase=self._beat_phase_at(t),
+            bar=self._bar_at(t),
+        )
