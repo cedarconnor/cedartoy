@@ -16,6 +16,37 @@ from .audio import AudioProcessor
 from .naming import resolve_output_path
 from .options_schema import EXR_AVAILABLE
 
+
+def _mix_audio_textures(
+    raw: np.ndarray,
+    cued: np.ndarray,
+    mode: str,
+    blend: float,
+) -> np.ndarray:
+    """Combine raw FFT + synthesized cued textures per bundle_mode."""
+    if mode == "raw":
+        return raw
+    if mode == "cued":
+        return cued
+    if mode == "blend":
+        b = max(0.0, min(1.0, float(blend)))
+        return (raw * (1.0 - b) + cued * b).astype(np.float32)
+    return cued
+
+
+def _builtin_uniforms_from_eval(eval_frame) -> Dict[str, Any]:
+    """Translate an EvalFrame (or None) into the five Phase 1 built-in uniforms."""
+    if eval_frame is None:
+        return {"iBpm": 0.0, "iBeat": 0.0, "iBar": 0,
+                "iSectionEnergy": 0.0, "iEnergy": 0.0}
+    return {
+        "iBpm": float(eval_frame.bpm),
+        "iBeat": float(eval_frame.beat_phase),
+        "iBar": int(eval_frame.bar),
+        "iSectionEnergy": float(eval_frame.section_energy),
+        "iEnergy": float(eval_frame.global_energy),
+    }
+
 try:
     import imageio.v3 as iio
 except ImportError:
