@@ -105,7 +105,7 @@ Steps:
 2. **Sections.** For each `analysis.sections[i]`:
    - `lufs`: compute from `analysis.curves["lufs"]` windowed to `[start, end]` if a global LUFS curve exists; else `None`.
    - `spectral_flux_rise`: pull from the matching `analysis.section_transitions` entry by `t` proximity; else `None`.
-   - `energy_rank`: computed in a second pass after all sections built — rank by `0.5·spectral_flux_rise_normalized + 0.5·lufs_normalized` (using whichever component is available), normalize to `[0,1]` by `(rank − min) / (max − min)`. Single section → `0.5`. All-zero rankings → `0.5` uniform.
+   - `energy_rank`: computed in a second pass after all sections built — rank by `0.5·spectral_flux_rise_normalized + 0.5·lufs_normalized` (using whichever component is available), normalize to `[0,1]` by `(rank − min) / (max − min)`. Edge cases: single section, `max == min`, or all-zero rankings → every section gets `0.5`.
 3. **Drums.** Regroup `analysis.onsets.get("drums", [])` by `drum_class` field. Onsets with `drum_class is None` are dropped. Result keyed by `"kick"`, `"snare"`, `"hat"`, `"tom"`, `"cymbal"`, `"other"` (matching `DRUM_CLASSES` in `drum_classifier.py`).
 4. **MIDI.** Pass through `analysis.midi` keys as-is. Each `MidiNote` → `MidiNoteBundle` (drops `frame`/`timecode` which are derived).
 5. **midi_energy.** For each stem in `analysis.midi`, derive an activity curve at `hop_sec = analysis.analysis_config.curve_hop_sec` (default 0.04). Per bin: `sum(velocity/127 × max(0, min(bin_end, note.t + note.duration) − max(bin_start, note.t)) / hop_sec)` over notes touching the bin. Clip to `[0, 1]`.
@@ -202,7 +202,7 @@ def load_for_audio(audio_path: Path, override_path: Path | None = None) -> Bundl
 - **`bar`**: last `BeatEvent` with `is_downbeat=True` at or before `t` → its `bar`. If no downbeats present, fall back to `int(t × bpm / 60 / time_signature[0])`.
 - **`section_energy`**: `bundle.sections[i].energy_rank` where `sections[i].start ≤ t < sections[i].end`; else `0.0`.
 - **`global_energy`**: linear-interpolate `bundle.global_energy.values` at `t / hop_sec`.
-- **`drum_pulses`**: per drum class, sum ADSR contributions from each `DrumOnset` at or before `t`. Default ADSR `(a=0.005, d=0.08, s=0.0, r=0.0)` — bundle doesn't carry per-onset envelope (the embedded cuesheet does; Phase 1 keeps the evaluator on top-level `bundle.drums` for simplicity). Clamped `[0,1]` per class.
+- **`drum_pulses`**: per drum class, sum ADSR contributions from each `DrumOnset` at or before `t`. Default ADSR `(a=0.005s, d=0.08s, s=0.0 [unitless level], r=0.0s)` — bundle doesn't carry per-onset envelope (the embedded cuesheet does; Phase 1 keeps the evaluator on top-level `bundle.drums` for simplicity). Clamped `[0,1]` per class.
 - **`midi_energy`**: per stem, linear-interpolate `bundle.midi_energy[stem].values` at `t / hop_sec`.
 - **`stems_energy`**: same as `midi_energy` but against `bundle.stems_energy`. Empty in Phase 1.
 
@@ -399,6 +399,8 @@ musicue export-bundle song.wav   # NEW — composes both into song.musicue.json
 `export-bundle` auto-runs the prerequisites if their outputs are missing.
 
 CedarToy discovery: only `song.musicue.json`. If absent, no bundle features. (No cuesheet-only degraded mode in Phase 1 — explicit non-goal.)
+
+**Sibling-stem rule:** `<audio>.with_suffix("").with_suffix(".musicue.json")` — strips one suffix, appends one. `song.wav` → `song.musicue.json`. `song.tar.gz` → `song.tar.musicue.json` (still next to the audio, still discoverable).
 
 ---
 
