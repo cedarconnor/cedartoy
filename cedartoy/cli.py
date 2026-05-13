@@ -187,7 +187,10 @@ def config_to_job(cfg: dict) -> RenderJob:
         }),
         shader_parameters=cfg.get("shader_parameters", {}),
         disk_streaming=cfg.get("disk_streaming"),
-        multipass_graph=mp
+        multipass_graph=mp,
+        bundle_path=Path(cfg["bundle_path"]) if cfg.get("bundle_path") else None,
+        bundle_mode=cfg.get("bundle_mode", "auto"),
+        bundle_blend=cfg.get("bundle_blend", 0.5),
     )
 
 def run_ui_server(args):
