@@ -25,6 +25,7 @@ The Web UI supports interactive configuration, dynamic shader parameters, render
 - **Audio Reactivity**:
   - Full support for Shadertoy's `iChannel0` (512x2 FFT + Waveform).
   - **Generic Parameters**: usage of `// @param` to tune audio reactivity per shader.
+  - **MusiCue Bundle Integration**: if `song.musicue.json` sits next to your audio file, CedarToy synthesizes a beat-locked `iChannel0` from MusiCue's structured cues and binds `iBpm`, `iBeat`, `iBar`, `iSectionEnergy`, `iEnergy` uniforms. Generate with `musicue export-bundle <audio>`. See [docs/AUDIO_SYSTEM.md](docs/AUDIO_SYSTEM.md) for the full reference.
 - **VR & Dome Support**:
   - **LL180 (Dome 180)**: Optimized rendering for hemispherical domes.
   - **Equirectangular**: Full 360° spherical rendering.
