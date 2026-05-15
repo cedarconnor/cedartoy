@@ -11,12 +11,70 @@ class OutputPanel extends HTMLElement {
             this.config = { ...ce.config };
         }
         document.addEventListener('config-change', (e) => {
-            // Don't echo our own updates back into a render loop.
             this.config = { ...e.detail };
             this._syncFields();
+            this._refreshEstimate();
         });
         this.render();
         this.attachEventListeners();
+        this._refreshEstimate();
+    }
+
+    async _refreshEstimate() {
+        if (this._estimateTimer) clearTimeout(this._estimateTimer);
+        this._estimateTimer = setTimeout(async () => {
+            const cfg = this.config;
+            const out = this.querySelector('#render-estimate');
+            if (!out) return;
+            if (!cfg.shader || !cfg.width || !cfg.height || !cfg.fps) {
+                out.textContent = 'Estimate: pick a shader and resolution.';
+                return;
+            }
+            const basename = (cfg.shader.split(/[\\/]/).pop() || '').replace(/\.glsl$/, '');
+            const body = {
+                shader_basename: basename,
+                width: cfg.width, height: cfg.height,
+                fps: cfg.fps, duration_sec: cfg.duration_sec || 10,
+                tile_count: (cfg.tiles_x || 1) * (cfg.tiles_y || 1),
+                ss_scale: cfg.ss_scale || 1.0,
+                format: cfg.default_output_format || 'png',
+                bit_depth: this._bitDepthInt(cfg.default_bit_depth),
+            };
+            try {
+                const r = await fetch('/api/render/estimate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!r.ok) {
+                    const detail = await r.json().catch(() => ({}));
+                    throw new Error(detail.detail || `HTTP ${r.status}`);
+                }
+                this._renderEstimate(await r.json());
+            } catch (err) {
+                out.textContent = `Estimate failed: ${err.message}`;
+            }
+        }, 250);
+    }
+
+    _bitDepthInt(s) {
+        if (s === '16f') return 16;
+        if (s === '32f') return 32;
+        return 8;
+    }
+
+    _renderEstimate(e) {
+        const out = this.querySelector('#render-estimate');
+        if (!out) return;
+        const dt = (e.total_seconds / 60).toFixed(1);
+        const sz = (e.output_bytes / (1024 ** 3)).toFixed(1);
+        const hint = e.history_hit ? '' : ' (no prior render data)';
+        const warn = (e.exceeds_time_threshold_1h || e.exceeds_size_threshold_50gb)
+            ? ' ⚠ over budget' : '';
+        out.innerHTML =
+            `Estimate: ${e.frame_time_sec.toFixed(1)} s/frame · ` +
+            `${e.total_frames} frames · ~${dt} min · ${sz} GB${warn}` +
+            `<span style="color:#666;">${hint}</span>`;
     }
 
     render() {
@@ -119,6 +177,7 @@ class OutputPanel extends HTMLElement {
     }
 
     _fire() {
+        this._refreshEstimate();
         const update = {
             camera_mode: this.querySelector('#output-preset').value,
             width: parseInt(this.querySelector('#out-width').value),
