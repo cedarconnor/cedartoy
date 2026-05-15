@@ -9,6 +9,7 @@ import './components/shader-editor.js?v=2';
 import './components/stage-rail.js?v=1';
 import './components/project-panel.js?v=1';
 import './components/output-panel.js?v=2';
+import './components/cue-scrubber.js?v=1';
 
 // Global app state
 window.cedartoy = {

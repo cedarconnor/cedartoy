@@ -67,6 +67,21 @@ def test_project_load_resolves_audio_path(client, tmp_path):
     assert resp.json()["folder"].lower() == str(folder.resolve()).lower()
 
 
+def test_project_bundle_returns_parsed_json(client, tmp_path):
+    folder = tmp_path / "song"
+    _seed(folder)
+    bundle_path = folder / "song.musicue.json"
+    resp = client.get("/api/project/bundle", params={"path": str(bundle_path)})
+    assert resp.status_code == 200
+    assert resp.json()["schema_version"] == "1.0"
+
+
+def test_project_bundle_404_when_missing(client, tmp_path):
+    resp = client.get("/api/project/bundle",
+                      params={"path": str(tmp_path / "nope.json")})
+    assert resp.status_code == 404
+
+
 def test_project_load_for_send_to_cedartoy_folder(client, tmp_path):
     """E2E: CedarToy reads a folder produced by MusiCue's send-to-cedartoy."""
     folder = tmp_path / "exported"
