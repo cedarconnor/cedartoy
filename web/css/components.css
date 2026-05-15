@@ -424,6 +424,10 @@
 }
 
 /* Cue scrubber */
+cue-scrubber {
+    display: block;
+    width: 100%;
+}
 .cue-scrubber-host {
     margin-top: 8px;
     border: 1px solid #2a2a2a;
