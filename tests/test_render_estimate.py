@@ -81,3 +81,30 @@ def test_estimate_exceeds_thresholds():
     assert est.exceeds_time_threshold(3600)
     assert est.exceeds_size_threshold(50 * 1024**3)
     assert not est.exceeds_time_threshold(6001)
+
+
+def test_record_history_ema(tmp_path):
+    from cedartoy.render_estimate import load_history, record_history, estimate_render
+    p = tmp_path / "history.json"
+
+    record_history(shader_basename="auroras", width=1920, height=1080,
+                   mean_frame_time=10.0, path=p)
+    record_history(shader_basename="auroras", width=1920, height=1080,
+                   mean_frame_time=20.0, path=p)
+
+    history = load_history(p)
+    # EMA with alpha=0.3: 0.7*10 + 0.3*20 = 13.0
+    assert history["auroras::1920x1080"]["mean_frame_time"] == pytest.approx(13.0)
+
+    est = estimate_render(
+        shader_basename="auroras", width=1920, height=1080,
+        fps=60, duration_sec=10.0, tile_count=1, ss_scale=1.0,
+        format="png", bit_depth=8, history=history,
+    )
+    assert est.frame_time_sec == pytest.approx(13.0)
+    assert est.history_hit is True
+
+
+def test_load_history_missing_returns_empty(tmp_path):
+    from cedartoy.render_estimate import load_history
+    assert load_history(tmp_path / "nope.json") == {}
