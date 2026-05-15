@@ -92,35 +92,48 @@ In the Web UI, simply upload an audio file in the **Audio** section.
 
 By default CedarToy reads the raw frequency spectrum of your audio. That works for any sound — speech, ambient noise, anything — but it doesn't know what a "beat" or a "chorus" is, so the visuals just track loudness.
 
-If you also use **[MusiCue](https://github.com/cedarconnor/MusiCue)**, you can hand CedarToy a structured *bundle* of the song: when each beat lands, which seconds are the chorus, where the kick drum hits, where the vocals enter. CedarToy then drives the shader from those musical events instead of raw amplitude. The whole hand-off is a single JSON file next to your audio.
+If you also use **[MusiCue](https://github.com/cedarconnor/MusiCue)**, you can hand CedarToy a structured *bundle* of the song: when each beat lands, which seconds are the chorus, where the kick drum hits, where the vocals enter. CedarToy then drives the shader from those musical events instead of raw amplitude.
 
-**Three steps:**
+#### Recommended workflow — portable project folder
 
-1. **Generate the bundle in MusiCue** (once per song):
+Use MusiCue's **→ Send to CedarToy** button (or the `musicue send-to-cedartoy` CLI alias) to produce a self-contained folder you can move between machines:
 
-   ```bash
-   musicue export-bundle my_music.mp3
-   ```
+```
+my_song/
+  song.wav                     audio decoded at native sample rate
+  song.musicue.json            the bundle CedarToy reads
+  manifest.json                grammar + MusiCue version + original audio filename
+  stems/                       optional — for hand-mixing or future per-stem uniforms
+    drums.wav  bass.wav  vocals.wav  other.wav
+```
 
-   This writes `my_music.musicue.json` next to `my_music.mp3`. The first run is slow because MusiCue does the full analysis (stem separation, beat detection, MIDI extraction); subsequent runs reuse the cache.
+Point CedarToy at the `song.wav` inside the folder and it auto-discovers the sibling `song.musicue.json` — no extra flags:
 
-2. **Render in CedarToy as normal** — no extra flags needed. CedarToy automatically looks for `<audio_stem>.musicue.json` next to the audio file and uses it:
+```bash
+python -m cedartoy.cli render shaders/luminescence.glsl --audio-path my_song/song.wav
+```
 
-   ```bash
-   python -m cedartoy.cli render shaders/luminescence.glsl --audio-path my_music.mp3
-   ```
+The web UI works the same way — set **Audio Path** to the `song.wav` inside the project folder. The folder is the unit of portability; everything CedarToy needs sits next to the audio.
 
-3. **Your shader can read five extra uniforms** for more musical control. Declaring any of these in your GLSL opts the shader into bundle-aware reactivity:
+#### Legacy sibling-discovery workflow
 
-   ```glsl
-   uniform float iBpm;            // current BPM (e.g. 128.0)
-   uniform float iBeat;           // phase 0..1 within the current beat
-   uniform int   iBar;            // bar number (counts up from 0)
-   uniform float iSectionEnergy;  // 0..1, how energetic the current section is
-   uniform float iEnergy;         // 0..1, overall loudness right now
-   ```
+If you only have a single-file bundle from `musicue export-bundle my_music.mp3` (no `--folder` flag), CedarToy still auto-discovers it as `<audio_stem>.musicue.json` next to your audio file. Same behavior, no folder structure required — useful for one-off renders where you don't need the portable layout.
 
-   Shaders that don't declare them still work — they just see the bundle-driven `iChannel0` texture and behave more musically without any code change.
+#### Bundle-aware shader uniforms
+
+Your shader can read five extra uniforms for musical control. Declaring any of these in your GLSL opts the shader into bundle-aware reactivity:
+
+```glsl
+uniform float iBpm;            // current BPM (e.g. 128.0)
+uniform float iBeat;           // phase 0..1 within the current beat
+uniform int   iBar;            // bar number (counts up from 0)
+uniform float iSectionEnergy;  // 0..1, how energetic the current section is
+uniform float iEnergy;         // 0..1, overall loudness right now
+```
+
+Shaders that don't declare them still work — they just see the bundle-driven `iChannel0` texture and behave more musically without any code change.
+
+#### Bundle mode controls
 
 **Choose how strongly the bundle drives the shader** with `--bundle-mode`:
 
