@@ -20,13 +20,24 @@
             </nav>
         </header>
 
+        <stage-rail></stage-rail>
+
         <main class="app-main">
             <aside class="shader-browser-panel">
                 <shader-browser></shader-browser>
             </aside>
 
             <section class="config-editor-panel">
-                <config-editor></config-editor>
+                <div id="stage-panels">
+                    <div data-stage="project"><project-panel></project-panel></div>
+                    <div data-stage="shader" hidden><config-editor></config-editor></div>
+                    <div data-stage="output" hidden><output-panel></output-panel></div>
+                    <div data-stage="render" hidden>
+                        <div style="padding: 16px; color: #aaa;">
+                            Use the Render panel at the bottom of the page to start your render.
+                        </div>
+                    </div>
+                </div>
             </section>
 
             <section class="preview-panel-wrapper">

@@ -6,6 +6,9 @@ import './components/audio-viz.js?v=2';
 import './components/render-panel.js?v=2';
 import './components/directory-browser.js?v=2';
 import './components/shader-editor.js?v=2';
+import './components/stage-rail.js?v=1';
+import './components/project-panel.js?v=1';
+import './components/output-panel.js?v=1';
 
 // Global app state
 window.cedartoy = {
@@ -55,4 +58,21 @@ document.addEventListener('shader-select', async (e) => {
 document.addEventListener('config-change', (e) => {
     window.cedartoy.config = e.detail;
     console.log('Config updated:', window.cedartoy.config);
+});
+
+// Stage rail: toggle panel visibility based on active stage.
+document.addEventListener('stage-change', (e) => {
+    document.querySelectorAll('#stage-panels > div').forEach(d => {
+        d.hidden = d.dataset.stage !== e.detail.stage;
+    });
+});
+
+// Project loaded: feed audio/bundle paths into config-editor so renders pick them up.
+document.addEventListener('project-loaded', (e) => {
+    const ce = document.querySelector('config-editor');
+    if (!ce) return;
+    if (e.detail.audio_path) ce.config.audio_path = e.detail.audio_path;
+    if (e.detail.bundle_path) ce.config.bundle_path = e.detail.bundle_path;
+    if (typeof ce.saveToLocalStorage === 'function') ce.saveToLocalStorage();
+    document.dispatchEvent(new CustomEvent('config-change', { detail: ce.config }));
 });
