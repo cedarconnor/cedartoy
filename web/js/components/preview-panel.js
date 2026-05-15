@@ -171,14 +171,32 @@ class PreviewPanel extends HTMLElement {
             }
         });
 
-        // Update slider during playback
+        // Update slider during playback + emit preview-frame for the cue scrubber.
         this._updateInterval = setInterval(() => {
             if (this.playing && this.renderer) {
                 const progress = (this.renderer.currentTime / this.duration) * 1000;
                 timeSlider.value = Math.min(progress, 1000);
                 this.updateTimeDisplay();
+                document.dispatchEvent(new CustomEvent('preview-frame', {
+                    detail: { timeSec: this.renderer.currentTime },
+                }));
             }
         }, 100);
+
+        // Cue scrubber click-to-seek: jump preview playhead to a given time.
+        document.addEventListener('scrubber-seek', (e) => {
+            const t = Math.max(0, Math.min(this.duration, e.detail.t));
+            if (this.renderer) {
+                this.renderer.currentTime = t;
+                // Mirror into the time slider so the UI matches.
+                const slider = this.querySelector('#time-slider');
+                if (slider) slider.value = Math.min((t / this.duration) * 1000, 1000);
+                this.updateTimeDisplay();
+                document.dispatchEvent(new CustomEvent('preview-frame', {
+                    detail: { timeSec: t },
+                }));
+            }
+        });
     }
 
     async loadShader(path) {
