@@ -61,6 +61,15 @@ class ConfigEditor extends HTMLElement {
                                placeholder="Select a shader from the browser">
                     </div>
 
+                    <!-- Reactivity status + LLM prompt copy -->
+                    <div class="reactivity-status" id="reactivity-status">
+                        <div id="reactivity-declared" class="form-hint">Reactivity: pick a shader to inspect.</div>
+                        <button class="btn btn-secondary" id="reactivity-prompt-btn"
+                                title="Copy a Claude-ready prompt that retrofits MusiCue reactivity onto this shader.">
+                            Make this shader reactive ▸
+                        </button>
+                    </div>
+
                     <!-- Shader Parameters Section (Dynamic) -->
                     <div id="shader-params-container"></div>
 
@@ -83,6 +92,7 @@ class ConfigEditor extends HTMLElement {
 
     async updateShaderParams() {
         let shaderPath = this.config.shader;
+        this._updateReactivityStatus(shaderPath);
         const container = this.querySelector('#shader-params-container');
         if (!shaderPath || !container) return;
 
@@ -183,6 +193,63 @@ class ConfigEditor extends HTMLElement {
                 alert(`Saved to ${filename}`);
             }
         });
+
+        // "Make this shader reactive ▸" button.
+        this.querySelector('#reactivity-prompt-btn')?.addEventListener('click', async () => {
+            await this._onReactivityPromptClick();
+        });
+    }
+
+    async _updateReactivityStatus(shaderPath) {
+        const out = this.querySelector('#reactivity-declared');
+        if (!out) return;
+        if (!shaderPath) {
+            out.textContent = 'Reactivity: pick a shader to inspect.';
+            this._reactivityPrompt = null;
+            return;
+        }
+        try {
+            const r = await fetch(
+                `/api/reactivity/prompt?shader=${encodeURIComponent(shaderPath)}`
+            );
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const data = await r.json();
+            this._reactivityPrompt = data.prompt;
+            const declared = data.declared_uniforms.join(' ') || '(none)';
+            const missing = data.missing_uniforms.join(' ') || '(none)';
+            out.innerHTML =
+                `Reactivity: declared <strong>${declared}</strong> · ` +
+                `missing <span style="color:#888;">${missing}</span>`;
+        } catch (e) {
+            out.textContent = `Reactivity status failed: ${e.message}`;
+            this._reactivityPrompt = null;
+        }
+    }
+
+    async _onReactivityPromptClick() {
+        if (!this._reactivityPrompt) {
+            // Try to refresh in case the shader changed but status hadn't loaded yet.
+            await this._updateReactivityStatus(this.config.shader);
+            if (!this._reactivityPrompt) {
+                alert('Pick a shader first.');
+                return;
+            }
+        }
+        try {
+            await navigator.clipboard.writeText(this._reactivityPrompt);
+            const status = this.querySelector('#reactivity-status');
+            const note = document.createElement('span');
+            note.textContent = ' ✔ copied — paste into Claude';
+            note.style.color = '#7ec97e';
+            note.style.marginLeft = '8px';
+            status.appendChild(note);
+            setTimeout(() => note.remove(), 4000);
+        } catch (e) {
+            // Clipboard API unavailable (e.g. plain http). Fall back to a blob URL.
+            const blob = new Blob([this._reactivityPrompt], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank');
+        }
     }
 
     saveToLocalStorage() {

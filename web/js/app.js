@@ -1,6 +1,6 @@
 import { api } from './api.js';
 import './components/shader-browser.js?v=2';
-import './components/config-editor.js?v=3';
+import './components/config-editor.js?v=4';
 import './components/preview-panel.js?v=3';
 import './components/audio-viz.js?v=2';
 import './components/render-panel.js?v=3';

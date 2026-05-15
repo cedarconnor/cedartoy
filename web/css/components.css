@@ -454,3 +454,17 @@ cue-scrubber {
     font-family: monospace;
     font-size: 12px;
 }
+
+/* Reactivity status row in stage 2 */
+.reactivity-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #2a2a2a;
+}
+.reactivity-status .form-hint {
+    margin: 0;
+    flex: 1;
+}
