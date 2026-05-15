@@ -82,7 +82,43 @@ class RenderJobManager:
         job.result = dict(result)
         job.process = None
         self._cleanup_config(job)
+        self._record_history(job, result)
         self._touch(job)
+
+    def _record_history(self, job: RenderJobRecord, result: Dict[str, Any]) -> None:
+        """Feed completion stats into the render_estimate history file.
+
+        Refines the per-(shader, resolution) mean_frame_time used by
+        /api/render/estimate. Best-effort: never let a history hiccup
+        break job completion.
+        """
+        try:
+            shader = job.config.get("shader") or ""
+            shader_basename = Path(shader).stem if shader else ""
+            width = int(job.config.get("width") or 0)
+            height = int(job.config.get("height") or 0)
+            # Prefer the [COMPLETE] payload; fall back to accumulated progress.
+            frames = int(
+                result.get("frames_rendered")
+                or result.get("frames")
+                or job.progress.get("frame")
+                or job.progress.get("total")
+                or 0
+            )
+            elapsed = float(
+                result.get("elapsed_sec")
+                or job.progress.get("elapsed_sec")
+                or 0.0
+            )
+            if shader_basename and width > 0 and height > 0 and frames > 0 and elapsed > 0:
+                from cedartoy.render_estimate import record_history
+                record_history(
+                    shader_basename=shader_basename,
+                    width=width, height=height,
+                    mean_frame_time=elapsed / frames,
+                )
+        except Exception:
+            pass
 
     def mark_error(self, job_id: str, error: Dict[str, Any]) -> None:
         job = self.get_job(job_id)
