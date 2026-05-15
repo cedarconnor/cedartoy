@@ -54,6 +54,15 @@ class OutputPanel extends HTMLElement {
                 <label>Camera tilt (degrees)</label>
                 <input id="out-tilt" type="number" min="0" max="90" value="${this.config.camera_tilt_deg||0}">
 
+                <label>Supersampling scale</label>
+                <input id="out-ss" type="number" min="1" max="4" step="0.5" value="${this.config.ss_scale||1.0}">
+
+                <label>Temporal samples (motion blur)</label>
+                <input id="out-temporal" type="number" min="1" max="64" value="${this.config.temporal_samples||1}">
+
+                <label>Shutter angle (0-1)</label>
+                <input id="out-shutter" type="number" min="0" max="1" step="0.1" value="${this.config.shutter ?? 0.5}">
+
                 <label>Format</label>
                 <select id="out-format">
                     <option value="png" ${this.config.default_output_format==='png'?'selected':''}>PNG</option>
@@ -83,6 +92,9 @@ class OutputPanel extends HTMLElement {
         set('#out-tiles-x', this.config.tiles_x || 1);
         set('#out-tiles-y', this.config.tiles_y || 1);
         set('#out-tilt', this.config.camera_tilt_deg || 0);
+        set('#out-ss', this.config.ss_scale || 1.0);
+        set('#out-temporal', this.config.temporal_samples || 1);
+        set('#out-shutter', this.config.shutter ?? 0.5);
         set('#out-format', this.config.default_output_format || 'png');
         set('#out-bit-depth', String(this.config.default_bit_depth || '8'));
         set('#output-preset', this.config.camera_mode || 'equirect');
@@ -100,6 +112,7 @@ class OutputPanel extends HTMLElement {
         });
         ['#output-preset', '#out-width', '#out-height', '#out-fps',
          '#out-duration', '#out-tiles-x', '#out-tiles-y', '#out-tilt',
+         '#out-ss', '#out-temporal', '#out-shutter',
          '#out-format', '#out-bit-depth'].forEach(sel => {
             this.querySelector(sel)?.addEventListener('change', () => this._fire());
         });
@@ -115,6 +128,9 @@ class OutputPanel extends HTMLElement {
             tiles_x: parseInt(this.querySelector('#out-tiles-x').value),
             tiles_y: parseInt(this.querySelector('#out-tiles-y').value),
             camera_tilt_deg: parseInt(this.querySelector('#out-tilt').value),
+            ss_scale: parseFloat(this.querySelector('#out-ss').value),
+            temporal_samples: parseInt(this.querySelector('#out-temporal').value),
+            shutter: parseFloat(this.querySelector('#out-shutter').value),
             default_output_format: this.querySelector('#out-format').value,
             default_bit_depth: this.querySelector('#out-bit-depth').value,
         };
