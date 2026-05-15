@@ -29,7 +29,7 @@ async def health_check():
     return {"status": "ok", "message": "CedarToy Web UI is running"}
 
 # Import and mount API routers
-from .api import shaders, config, audio, render, files
+from .api import shaders, config, audio, render, files, project
 from .websocket import router as ws_router
 
 app.include_router(shaders.router, prefix="/api/shaders", tags=["shaders"])
@@ -37,6 +37,7 @@ app.include_router(config.router, prefix="/api/config", tags=["config"])
 app.include_router(audio.router, prefix="/api/audio", tags=["audio"])
 app.include_router(render.router, prefix="/api/render", tags=["render"])
 app.include_router(files.router, prefix="/api/files", tags=["files"])
+app.include_router(project.router, prefix="/api/project", tags=["project"])
 app.include_router(ws_router, prefix="/ws", tags=["websocket"])
 
 # Serve static files (frontend) - MUST be last to not intercept API routes
