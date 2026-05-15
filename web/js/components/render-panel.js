@@ -126,6 +126,49 @@ class RenderPanel extends HTMLElement {
         const configEditor = document.querySelector('config-editor');
         const config = configEditor ? configEditor.getConfig() : {};
 
+        // Render-budget guardrail. Skip when the user has permanently dismissed
+        // the warning via localStorage (cedartoy_skip_render_guardrail=1).
+        if (localStorage.getItem('cedartoy_skip_render_guardrail') !== '1' &&
+            config.shader && config.width && config.height && config.fps) {
+            try {
+                const basename = (config.shader.split(/[\\/]/).pop() || '').replace(/\.glsl$/, '');
+                const r = await fetch('/api/render/estimate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        shader_basename: basename,
+                        width: config.width, height: config.height,
+                        fps: config.fps, duration_sec: config.duration_sec || 10,
+                        tile_count: (config.tiles_x || 1) * (config.tiles_y || 1),
+                        ss_scale: config.ss_scale || 1.0,
+                        format: config.default_output_format || 'png',
+                        bit_depth: config.default_bit_depth === '16f' ? 16
+                                 : config.default_bit_depth === '32f' ? 32 : 8,
+                    }),
+                });
+                if (r.ok) {
+                    const e = await r.json();
+                    if (e.exceeds_time_threshold_1h || e.exceeds_size_threshold_50gb) {
+                        const dt = (e.total_seconds / 60).toFixed(1);
+                        const sz = (e.output_bytes / (1024 ** 3)).toFixed(1);
+                        const ok = confirm(
+                            `This render will take ~${dt} minutes and produce ${sz} GB of output.\n\n` +
+                            `Continue?\n\n` +
+                            `To skip this warning permanently, run in the browser console:\n` +
+                            `  localStorage.setItem('cedartoy_skip_render_guardrail','1')`
+                        );
+                        if (!ok) {
+                            this.addLog('Render cancelled by user (budget guardrail).');
+                            return;
+                        }
+                    }
+                }
+            } catch (err) {
+                // Don't block render on estimate errors; log and continue.
+                console.warn('budget estimate failed:', err);
+            }
+        }
+
         // Validate shader is selected
         if (!config.shader) {
             alert('Please select a shader first!');
