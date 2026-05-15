@@ -65,3 +65,21 @@ def test_project_load_resolves_audio_path(client, tmp_path):
     resp = client.post("/api/project/load", json={"path": str(audio)})
     assert resp.status_code == 200
     assert resp.json()["folder"].lower() == str(folder.resolve()).lower()
+
+
+def test_project_load_for_send_to_cedartoy_folder(client, tmp_path):
+    """E2E: CedarToy reads a folder produced by MusiCue's send-to-cedartoy."""
+    folder = tmp_path / "exported"
+    _seed(folder)
+    (folder / "stems").mkdir()
+    for n in ("drums", "bass", "vocals", "other"):
+        sf.write(str(folder / "stems" / f"{n}.wav"),
+                 np.zeros(11025, dtype="float32"), 44100, subtype="PCM_16")
+
+    resp = client.post("/api/project/load", json={"path": str(folder)})
+    body = resp.json()
+    assert resp.status_code == 200
+    assert set(body["stems_paths"]) == {"drums", "bass", "vocals", "other"}
+    assert body["manifest"]["grammar"] == "concert_visuals"
+    assert body["bundle_sha_matches_audio"] is True
+    assert body["warnings"] == []
