@@ -2,23 +2,25 @@ class CueScrubber extends HTMLElement {
     constructor() {
         super();
         this.bundle = null;
+        this.peaks = null;          // array of 1000 floats from /api/project/waveform
         this.durationSec = 0;
         this._currentTime = 0;
     }
 
     connectedCallback() {
         document.addEventListener('project-loaded', (e) => {
-            if (e.detail && e.detail.bundle_path) {
-                this._loadBundle(e.detail.bundle_path);
-            } else {
-                this.bundle = null;
-                this.durationSec = 0;
-                this.render();
+            this.bundle = null;
+            this.peaks = null;
+            this.durationSec = 0;
+            if (e.detail) {
+                if (e.detail.bundle_path) this._loadBundle(e.detail.bundle_path);
+                if (e.detail.audio_path)  this._loadPeaks(e.detail.audio_path);
             }
+            this.render();
         });
-        document.addEventListener('preview-frame', (e) => {
+        document.addEventListener('transport-frame', (e) => {
             this._currentTime = e.detail.timeSec || 0;
-            this._updateReadout();
+            this._updatePlayhead();
         });
         this.render();
     }
@@ -38,33 +40,68 @@ class CueScrubber extends HTMLElement {
         }
     }
 
+    async _loadPeaks(audioPath) {
+        try {
+            const r = await fetch(`/api/project/waveform?path=${encodeURIComponent(audioPath)}&n=1000`);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const body = await r.json();
+            this.peaks = body.peaks;
+            this.render();
+            this._attachClickHandler();
+        } catch (e) {
+            console.error('cue-scrubber peaks load failed', e);
+            this.peaks = null;
+            this.render();
+        }
+    }
+
     render() {
-        if (!this.bundle || this.durationSec <= 0) {
-            this.innerHTML = `<div class="cue-scrubber-empty">No bundle loaded.</div>`;
+        const haveData = (this.bundle && this.durationSec > 0) || (this.peaks && this.peaks.length);
+        if (!haveData) {
+            this.innerHTML = `<div class="cue-scrubber-empty">No project loaded.</div>`;
             return;
         }
         const W = 1200, H = 100;
-        const t2x = (t) => (t / this.durationSec) * W;
+        const dur = this.durationSec || 1;
+        const t2x = (t) => (t / dur) * W;
 
-        const sectionBlocks = (this.bundle.sections || []).map((s, i) => {
+        // Waveform underlay (peaks mirrored above and below the centerline).
+        let wave = '';
+        if (this.peaks && this.peaks.length) {
+            const N = this.peaks.length;
+            const pts = [];
+            for (let i = 0; i < N; i++) {
+                const x = (i / (N - 1)) * W;
+                const v = Math.max(0, Math.min(1, this.peaks[i] || 0));
+                pts.push(`${x.toFixed(1)},${(50 - v * 35).toFixed(1)}`);
+            }
+            for (let i = N - 1; i >= 0; i--) {
+                const x = (i / (N - 1)) * W;
+                const v = Math.max(0, Math.min(1, this.peaks[i] || 0));
+                pts.push(`${x.toFixed(1)},${(50 + v * 35).toFixed(1)}`);
+            }
+            wave = `<polygon points="${pts.join(' ')}" fill="#2d4a3a" stroke="none"/>`;
+        }
+
+        const sectionBlocks = (this.bundle?.sections || []).map((s, i) => {
             const x = t2x(s.start), w = t2x(s.end) - x;
             const fill = i % 2 === 0 ? '#2a2a2a' : '#333';
-            return `<rect x="${x}" y="0" width="${Math.max(0, w)}" height="20" fill="${fill}"/>
+            return `<rect x="${x}" y="0" width="${Math.max(0, w)}" height="20" fill="${fill}" opacity="0.85"/>
                     <text x="${x + 4}" y="14" fill="#aaa" font-size="10" pointer-events="none">${this._escape(s.label || '')}</text>`;
         }).join('');
 
-        const beatTicks = (this.bundle.beats || []).map((b) => {
+        const beatTicks = (this.bundle?.beats || []).map((b) => {
             const x = t2x(b.t);
             const tall = b.is_downbeat ? 18 : 10;
             return `<line x1="${x}" y1="20" x2="${x}" y2="${20 + tall}" stroke="#666" stroke-width="${b.is_downbeat ? 1.5 : 0.5}"/>`;
         }).join('');
 
-        const kicks = ((this.bundle.drums || {}).kick || []).map((d) => {
+        const kicks = ((this.bundle?.drums || {}).kick || []).map((d) => {
             const x = t2x(d.t);
             return `<circle cx="${x}" cy="55" r="2" fill="#e88"/>`;
         }).join('');
 
-        const energy = this.bundle.global_energy;
+        const energy = this.bundle?.global_energy;
         let energyPath = '';
         if (energy && energy.values && energy.values.length > 1 && energy.hop_sec > 0) {
             const pts = energy.values.map((v, i) => {
@@ -74,70 +111,41 @@ class CueScrubber extends HTMLElement {
             energyPath = `<polyline points="${pts}" stroke="#7ec97e" stroke-width="1" fill="none"/>`;
         }
 
+        const playheadX = t2x(this._currentTime);
+
         this.innerHTML = `
             <div class="cue-scrubber-host">
                 <svg class="cue-scrubber-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+                    ${wave}
                     ${sectionBlocks}
                     ${beatTicks}
                     ${kicks}
                     ${energyPath}
+                    <line id="cue-playhead" x1="${playheadX}" y1="0" x2="${playheadX}" y2="${H}" stroke="#e94560" stroke-width="2"/>
                     <rect x="0" y="0" width="${W}" height="${H}" fill="transparent" id="scrub-hit"/>
                 </svg>
-                <div class="cue-scrubber-readout" id="cue-readout">
-                    iBpm — &nbsp; iBeat — &nbsp; iBar — &nbsp; iEnergy — &nbsp; iSectionEnergy —
-                </div>
             </div>
         `;
         this._attachClickHandler();
     }
 
+    _updatePlayhead() {
+        const line = this.querySelector('#cue-playhead');
+        if (!line || !this.durationSec) return;
+        const x = (this._currentTime / this.durationSec) * 1200;
+        line.setAttribute('x1', x);
+        line.setAttribute('x2', x);
+    }
+
     _attachClickHandler() {
         const hit = this.querySelector('#scrub-hit');
         if (!hit) return;
-        hit.addEventListener('click', (e) => {
+        hit.onclick = (e) => {
             const rect = hit.getBoundingClientRect();
             const x = e.clientX - rect.left;
-            const t = (x / rect.width) * this.durationSec;
-            this.dispatchEvent(new CustomEvent('scrubber-seek', {
-                detail: { t }, bubbles: true,
-            }));
-        });
-    }
-
-    _updateReadout() {
-        const out = this.querySelector('#cue-readout');
-        if (!out || !this.bundle) return;
-        const t = this._currentTime;
-        const bpm = (this.bundle.tempo && this.bundle.tempo.bpm_global) || 0;
-        const beats = this.bundle.beats || [];
-        let beatPhase = 0, bar = 0;
-        for (let i = 0; i < beats.length - 1; i++) {
-            if (beats[i].t <= t && t < beats[i + 1].t) {
-                const span = beats[i + 1].t - beats[i].t;
-                beatPhase = span > 0 ? (t - beats[i].t) / span : 0;
-                bar = beats[i].bar ?? 0;
-                break;
-            }
-        }
-        let energy = 0;
-        const ge = this.bundle.global_energy;
-        if (ge && ge.values && ge.hop_sec > 0) {
-            const idx = Math.min(Math.floor(t / ge.hop_sec), ge.values.length - 1);
-            if (idx >= 0) energy = ge.values[idx] ?? 0;
-        }
-        let sectionEnergy = 0;
-        for (const s of (this.bundle.sections || [])) {
-            if (s.start <= t && t < s.end) {
-                sectionEnergy = s.energy_rank ?? 0;
-                break;
-            }
-        }
-        out.textContent =
-            `iBpm ${bpm.toFixed(0)}  ` +
-            `iBeat ${beatPhase.toFixed(2)}  ` +
-            `iBar ${bar}  ` +
-            `iEnergy ${energy.toFixed(2)}  ` +
-            `iSectionEnergy ${sectionEnergy.toFixed(2)}`;
+            const t = (x / rect.width) * (this.durationSec || 1);
+            document.dispatchEvent(new CustomEvent('transport-seek', { detail: { t } }));
+        };
     }
 
     _escape(s) {
