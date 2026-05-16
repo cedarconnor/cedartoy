@@ -99,14 +99,22 @@ def load_project(target: Path) -> CedarToyProject:
     sha_match: bool | None = None
     if audio_path is not None and bundle_path is not None:
         try:
-            audio_sha = compute_audio_sha256(audio_path)
             bundle_doc = json.loads(bundle_path.read_text(encoding="utf-8"))
-            bundle_sha = bundle_doc.get("source_sha256")
-            sha_match = audio_sha == bundle_sha
-            if not sha_match:
+            decoded_sha = bundle_doc.get("decoded_audio_sha256")
+            if decoded_sha:
+                audio_sha = compute_audio_sha256(audio_path)
+                sha_match = audio_sha == decoded_sha
+                if not sha_match:
+                    warnings.append(
+                        f"Audio has changed since MusiCue exported it "
+                        f"(sha {audio_sha[:12]}… vs. expected {decoded_sha[:12]}…). "
+                        f"Re-export from MusiCue for fresh bundle data."
+                    )
+            else:
+                # Legacy bundle schema 1.0 — no decoded sha available.
                 warnings.append(
-                    f"bundle source_sha256 ({bundle_sha[:12] if bundle_sha else '?'}…) "
-                    f"does not match audio sha ({audio_sha[:12]}…); using anyway"
+                    "Bundle schema 1.0 — audio integrity check unavailable. "
+                    "Re-export from MusiCue for schema 1.1."
                 )
         except Exception as e:
             warnings.append(f"sha check failed: {e}")

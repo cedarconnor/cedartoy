@@ -44,17 +44,24 @@ def _write_silent_wav(path: Path) -> None:
 
 
 def _seed_minimal_project(folder: Path, *, with_bundle=True, with_manifest=True,
-                          bundle_sha: str | None = None) -> Path:
-    """Create a minimal folder layout matching the MusiCue export contract."""
+                          bundle_decoded_sha: str | None = None,
+                          bundle_schema_version: str = "1.1") -> Path:
+    """Create a minimal folder layout matching the MusiCue export contract.
+
+    Defaults to schema 1.1 with decoded_audio_sha256 matching the written WAV
+    (the "happy path" — real integrity check passes). Override
+    bundle_decoded_sha to force a mismatch, or set bundle_schema_version="1.0"
+    + bundle_decoded_sha=None to seed a legacy bundle.
+    """
     from cedartoy.project import compute_audio_sha256
     folder.mkdir(parents=True, exist_ok=True)
     audio = folder / "song.wav"
     _write_silent_wav(audio)
     if with_bundle:
-        sha = bundle_sha or compute_audio_sha256(audio)
-        (folder / "song.musicue.json").write_text(json.dumps({
-            "schema_version": "1.0",
-            "source_sha256": sha,
+        audio_sha = compute_audio_sha256(audio)
+        doc = {
+            "schema_version": bundle_schema_version,
+            "source_sha256": audio_sha,
             "duration_sec": 0.25,
             "fps": 24.0,
             "tempo": {"bpm_global": 120.0},
@@ -65,9 +72,14 @@ def _seed_minimal_project(folder: Path, *, with_bundle=True, with_manifest=True,
             "midi_energy": {},
             "stems_energy": {},
             "global_energy": {"hop_sec": 0.04, "values": []},
-            "cuesheet": {"schema_version": "1.0", "source_sha256": sha,
+            "cuesheet": {"schema_version": "1.0", "source_sha256": audio_sha,
                          "grammar": "concert_visuals", "duration_sec": 0.25},
-        }))
+        }
+        if bundle_schema_version == "1.1":
+            doc["decoded_audio_sha256"] = (
+                bundle_decoded_sha if bundle_decoded_sha is not None else audio_sha
+            )
+        (folder / "song.musicue.json").write_text(json.dumps(doc))
     if with_manifest:
         (folder / "manifest.json").write_text(json.dumps({
             "schema": "cedartoy-project/1",
@@ -136,10 +148,22 @@ def test_load_project_audio_only(tmp_path):
 def test_load_project_warns_on_sha_mismatch(tmp_path):
     from cedartoy.project import load_project
     folder = tmp_path / "mismatch"
-    _seed_minimal_project(folder, bundle_sha="0" * 64)
+    _seed_minimal_project(folder, bundle_decoded_sha="0" * 64)
     proj = load_project(folder)
     assert proj.bundle_sha_matches_audio is False
-    assert any("sha" in w.lower() for w in proj.warnings)
+    assert any("audio has changed" in w.lower() for w in proj.warnings)
+
+
+def test_load_project_legacy_bundle_1_0_skips_sha_check(tmp_path):
+    """Bundle schema 1.0 (no decoded_audio_sha256): match=None, benign note, no warning."""
+    from cedartoy.project import load_project
+    folder = tmp_path / "legacy_bundle"
+    _seed_minimal_project(folder, bundle_schema_version="1.0")
+    proj = load_project(folder)
+    assert proj.bundle_sha_matches_audio is None
+    notes = " ".join(proj.warnings).lower()
+    assert "integrity check unavailable" in notes
+    assert "audio has changed" not in notes  # no false-positive warning
 
 
 def test_load_project_includes_stems(tmp_path):

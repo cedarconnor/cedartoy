@@ -24,7 +24,8 @@ def _seed(folder: Path) -> Path:
     from cedartoy.project import compute_audio_sha256
     sha = compute_audio_sha256(audio)
     (folder / "song.musicue.json").write_text(json.dumps({
-        "schema_version": "1.0", "source_sha256": sha, "duration_sec": 0.25,
+        "schema_version": "1.1", "source_sha256": sha,
+        "decoded_audio_sha256": sha, "duration_sec": 0.25,
         "fps": 24.0, "tempo": {"bpm_global": 120.0}, "beats": [],
         "sections": [], "drums": {}, "midi": {}, "midi_energy": {},
         "stems_energy": {}, "global_energy": {"hop_sec": 0.04, "values": []},
@@ -73,7 +74,7 @@ def test_project_bundle_returns_parsed_json(client, tmp_path):
     bundle_path = folder / "song.musicue.json"
     resp = client.get("/api/project/bundle", params={"path": str(bundle_path)})
     assert resp.status_code == 200
-    assert resp.json()["schema_version"] == "1.0"
+    assert resp.json()["schema_version"] == "1.1"
 
 
 def test_project_bundle_404_when_missing(client, tmp_path):
