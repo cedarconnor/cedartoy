@@ -83,6 +83,35 @@ def test_project_bundle_404_when_missing(client, tmp_path):
     assert resp.status_code == 404
 
 
+def test_project_audio_returns_wav_bytes(client, tmp_path):
+    """GET /api/project/audio?path=<song.wav> streams the file."""
+    folder = tmp_path / "song"
+    audio = _seed(folder)
+    resp = client.get("/api/project/audio", params={"path": str(audio)})
+    assert resp.status_code == 200
+    assert resp.headers.get("accept-ranges") == "bytes"
+    assert resp.headers.get("content-type", "").startswith("audio/")
+    assert len(resp.content) == audio.stat().st_size
+
+
+def test_project_audio_supports_range_request(client, tmp_path):
+    """Range: bytes=0-99 returns 206 with the first 100 bytes."""
+    folder = tmp_path / "song"
+    audio = _seed(folder)
+    resp = client.get(
+        "/api/project/audio",
+        params={"path": str(audio)},
+        headers={"Range": "bytes=0-99"},
+    )
+    assert resp.status_code == 206
+    assert len(resp.content) == 100
+
+
+def test_project_audio_404_when_missing(client, tmp_path):
+    resp = client.get("/api/project/audio", params={"path": str(tmp_path / "nope.wav")})
+    assert resp.status_code == 404
+
+
 def test_project_load_for_send_to_cedartoy_folder(client, tmp_path):
     """E2E: CedarToy reads a folder produced by MusiCue's send-to-cedartoy."""
     folder = tmp_path / "exported"

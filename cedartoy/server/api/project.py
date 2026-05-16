@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from cedartoy.project import load_project
@@ -31,6 +32,20 @@ def project_load(body: ProjectLoadRequest) -> dict:
         "bundle_sha_matches_audio": proj.bundle_sha_matches_audio,
         "warnings": proj.warnings,
     }
+
+
+@router.get("/audio")
+def project_audio(path: str):
+    """Stream the project's audio file with Range support.
+
+    The browser's <audio> element uses Range to seek without re-downloading
+    the whole song. FileResponse handles Range/206 natively in Starlette.
+    """
+    p = Path(path)
+    if not p.exists() or not p.is_file():
+        raise HTTPException(status_code=404, detail="audio not found")
+    media_type = "audio/wav" if p.suffix.lower() == ".wav" else "audio/mpeg"
+    return FileResponse(p, media_type=media_type, headers={"Accept-Ranges": "bytes"})
 
 
 @router.get("/bundle")
