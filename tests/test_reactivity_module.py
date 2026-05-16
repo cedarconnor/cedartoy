@@ -71,3 +71,24 @@ def test_build_prompt_raises_when_template_missing_slot(tmp_path):
         build_reactivity_prompt(shader_src="void main(){}",
                                 template_path=template,
                                 cookbook_path=cookbook)
+
+
+def test_build_fixit_prompt_contains_all_sections():
+    """Fix-it prompt bundles original + broken + GL log + cookbook + directive."""
+    from cedartoy.reactivity import build_fixit_prompt
+
+    out = build_fixit_prompt(
+        broken_glsl="void main(){iKick;}",
+        gl_log="ERROR: 0:1: 'iKick' : undeclared identifier",
+        original_glsl="void main(){gl_FragColor=vec4(1.0);}",
+        cookbook="# Reactivity Cookbook\nkick_pulse_camera: …",
+    )
+    assert "iKick" in out
+    assert "undeclared identifier" in out
+    assert "gl_FragColor=vec4(1.0)" in out
+    assert "kick_pulse_camera" in out
+    assert "fix the compile error" in out.lower()
+    assert "## Original shader" in out
+    assert "## Broken attempt" in out
+    assert "## Compile error" in out
+    assert "## Reactivity cookbook" in out
