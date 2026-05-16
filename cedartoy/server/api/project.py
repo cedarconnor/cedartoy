@@ -48,6 +48,33 @@ def project_audio(path: str):
     return FileResponse(p, media_type=media_type, headers={"Accept-Ranges": "bytes"})
 
 
+@router.get("/waveform")
+def project_waveform(path: str, n: int = 1000) -> dict:
+    """Return `n` peak values (range -1.0..1.0) sampled across the audio file.
+
+    Used by cue-scrubber to paint the waveform underlay. The wav is read
+    fresh each call (no global state) — cheap for typical 3-5 minute songs.
+    """
+    p = Path(path)
+    if not p.exists() or not p.is_file():
+        raise HTTPException(status_code=404, detail="audio not found")
+    import numpy as np
+    import soundfile as sf
+    data, _ = sf.read(str(p), always_2d=False)
+    if data.ndim == 2:
+        data = data.mean(axis=1)
+    if len(data) == 0:
+        return {"peaks": [0.0] * n}
+    bucket = max(1, len(data) // n)
+    peaks = []
+    for i in range(n):
+        start = i * bucket
+        end = min(start + bucket, len(data))
+        chunk = data[start:end]
+        peaks.append(float(np.max(np.abs(chunk))) if len(chunk) else 0.0)
+    return {"peaks": peaks}
+
+
 @router.get("/bundle")
 def project_bundle(path: str) -> dict:
     """Return the bundle JSON at a server-local path.

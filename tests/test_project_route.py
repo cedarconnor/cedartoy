@@ -112,6 +112,32 @@ def test_project_audio_404_when_missing(client, tmp_path):
     assert resp.status_code == 404
 
 
+def test_project_waveform_returns_peaks(client, tmp_path):
+    """GET /api/project/waveform?path=<song.wav>&n=64 returns 64 peak floats."""
+    folder = tmp_path / "song"
+    audio = _seed(folder)
+    resp = client.get(
+        "/api/project/waveform",
+        params={"path": str(audio), "n": 64},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "peaks" in body
+    assert isinstance(body["peaks"], list)
+    assert len(body["peaks"]) == 64
+    for v in body["peaks"]:
+        assert isinstance(v, (int, float))
+        assert -1.0 <= v <= 1.0
+
+
+def test_project_waveform_404_when_missing(client, tmp_path):
+    resp = client.get(
+        "/api/project/waveform",
+        params={"path": str(tmp_path / "nope.wav"), "n": 64},
+    )
+    assert resp.status_code == 404
+
+
 def test_project_load_for_send_to_cedartoy_folder(client, tmp_path):
     """E2E: CedarToy reads a folder produced by MusiCue's send-to-cedartoy."""
     folder = tmp_path / "exported"
