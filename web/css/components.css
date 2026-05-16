@@ -408,19 +408,78 @@
     border-radius: 4px; margin: 8px 0;
 }
 
-/* Output panel */
-.output-panel { padding: 16px; }
-.output-panel h3 { margin-top: 0; }
-.output-panel label { display: block; margin-top: 8px; color: #aaa; font-size: 12px; }
-.output-panel input[type="number"], .output-panel select {
-    background: #1a1a1a; color: #eee; border: 1px solid #333;
-    border-radius: 4px; padding: 4px 6px; font-size: 13px;
-    margin-right: 4px;
+/* Output panel — 2x2 grid by concern */
+.output-panel { padding: 12px; }
+.output-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
 }
-.output-panel #render-estimate {
-    margin-top: 12px; padding: 8px;
-    background: #1a1a1a; border-radius: 4px;
-    font-family: monospace; font-size: 12px; color: #aaa;
+.output-card {
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 4px;
+    padding: 10px;
+}
+.output-card-title {
+    font-size: 10px;
+    color: #888;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}
+.output-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+    font-size: 12px;
+}
+.output-row:last-child { margin-bottom: 0; }
+.output-row label {
+    flex: 0 0 92px;
+    color: #aaa;
+    margin: 0;
+    cursor: help;
+}
+.output-row input[type="number"],
+.output-row select {
+    background: #0f0f0f;
+    color: #eee;
+    border: 1px solid #2a2a2a;
+    border-radius: 3px;
+    padding: 3px 6px;
+    font-size: 12px;
+    max-width: 100px;
+}
+.output-row select { max-width: 160px; }
+.output-estimate {
+    margin-top: 12px;
+    padding: 8px 10px;
+    background: #2a2a1a;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 12px;
+    color: #cca;
+}
+
+/* Stage helper bar */
+stage-helper { display: block; }
+.stage-helper {
+    background: #1a2a3a;
+    padding: 8px 14px;
+    border-radius: 3px;
+    margin: 0 12px 8px 12px;
+    font-size: 12px;
+    color: #cce;
+    line-height: 1.5;
+}
+.stage-helper strong {
+    color: #fff;
+    margin-right: 10px;
+}
+.stage-helper span {
+    color: #889;
 }
 
 /* Cue scrubber */
