@@ -28,6 +28,9 @@ class PreviewPanel extends HTMLElement {
         document.addEventListener('transport-frame', (e) => {
             if (this.renderer) {
                 this.renderer.currentTime = e.detail.timeSec || 0;
+                if (e.detail.bundle) {
+                    this.renderer.updateBundleUniforms(e.detail.bundle);
+                }
                 this.renderer.render();
             }
         });

@@ -153,37 +153,18 @@ class TransportStrip extends HTMLElement {
         const t = this.audio ? this.audio.currentTime : 0;
         this._updateTime(t);
         this._emitAudioData();
-        this._renderReadout(t);
-        document.dispatchEvent(new CustomEvent('transport-frame', { detail: { timeSec: t } }));
+        const bundle = this._computeBundleUniforms(t);
+        this._renderReadoutFrom(bundle);
+        document.dispatchEvent(new CustomEvent('transport-frame', {
+            detail: { timeSec: t, bundle },
+        }));
     }
 
-    _emitAudioData() {
-        if (!this._analyser) return;
-        this._analyser.getByteFrequencyData(this._fft);
-        this._analyser.getByteTimeDomainData(this._wave);
-        const fft = new Float32Array(512);
-        const wave = new Float32Array(512);
-        for (let i = 0; i < 512; i++) {
-            fft[i] = (this._fft[i] || 0) / 255.0;
-            wave[i] = ((this._wave[i] || 128) / 128.0) - 1.0;
-        }
-        document.dispatchEvent(new CustomEvent('audio-data', { detail: { fft, waveform: wave } }));
-    }
-
-    _updateTime(t) {
-        const fmt = (s) => {
-            const m = Math.floor(s / 60), ss = Math.floor(s % 60);
-            return `${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
-        };
-        this.querySelector('#ts-time').textContent = `${fmt(t)} / ${fmt(this.duration || 0)}`;
-    }
-
-    _renderReadout(t = 0) {
-        const out = this.querySelector('#ts-readout');
-        if (!out) return;
+    _computeBundleUniforms(t) {
+        // Returns {bpm, beat, bar, energy, sectionEnergy, sectionLabel} for
+        // the current playhead time. All zeros when no bundle is loaded.
         if (!this.bundle) {
-            out.textContent = 'iBpm — iBeat — iBar — iEnergy — iSectionEnergy —';
-            return;
+            return { bpm: 0, beat: 0, bar: 0, energy: 0, sectionEnergy: 0, sectionLabel: '—' };
         }
         const b = this.bundle;
         const bpm = (b.tempo && b.tempo.bpm_global) || 0;
@@ -211,9 +192,44 @@ class TransportStrip extends HTMLElement {
                 break;
             }
         }
+        return { bpm, beat: beatPhase, bar, energy, sectionEnergy, sectionLabel };
+    }
+
+    _emitAudioData() {
+        if (!this._analyser) return;
+        this._analyser.getByteFrequencyData(this._fft);
+        this._analyser.getByteTimeDomainData(this._wave);
+        const fft = new Float32Array(512);
+        const wave = new Float32Array(512);
+        for (let i = 0; i < 512; i++) {
+            fft[i] = (this._fft[i] || 0) / 255.0;
+            wave[i] = ((this._wave[i] || 128) / 128.0) - 1.0;
+        }
+        document.dispatchEvent(new CustomEvent('audio-data', { detail: { fft, waveform: wave } }));
+    }
+
+    _updateTime(t) {
+        const fmt = (s) => {
+            const m = Math.floor(s / 60), ss = Math.floor(s % 60);
+            return `${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+        };
+        this.querySelector('#ts-time').textContent = `${fmt(t)} / ${fmt(this.duration || 0)}`;
+    }
+
+    _renderReadout(t = 0) {
+        this._renderReadoutFrom(this._computeBundleUniforms(t));
+    }
+
+    _renderReadoutFrom(bundle) {
+        const out = this.querySelector('#ts-readout');
+        if (!out) return;
+        if (!this.bundle) {
+            out.textContent = 'iBpm — iBeat — iBar — iEnergy — iSectionEnergy —';
+            return;
+        }
         out.textContent =
-            `iBpm ${bpm.toFixed(0)} · iBeat ${beatPhase.toFixed(2)} · iBar ${bar} · ` +
-            `iEnergy ${energy.toFixed(2)} · iSectionEnergy ${sectionEnergy.toFixed(2)} · ${sectionLabel}`;
+            `iBpm ${bundle.bpm.toFixed(0)} · iBeat ${bundle.beat.toFixed(2)} · iBar ${bundle.bar} · ` +
+            `iEnergy ${bundle.energy.toFixed(2)} · iSectionEnergy ${bundle.sectionEnergy.toFixed(2)} · ${bundle.sectionLabel}`;
     }
 }
 

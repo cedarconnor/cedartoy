@@ -23,6 +23,10 @@ export class ShaderRenderer {
         this.cameraMode = 0; // 0=2D, 1=Equirect, 2=LL180
         this.cameraTilt = 0.0; // degrees
 
+        // MusiCue bundle uniforms — updated each transport-frame by preview-panel.
+        // All zeros when no bundle / no audio is playing.
+        this.bundleUniforms = { bpm: 0, beat: 0, bar: 0, energy: 0, sectionEnergy: 0 };
+
         // Mouse tracking for iMouse uniform
         this.mouseX = 0;
         this.mouseY = 0;
@@ -48,6 +52,18 @@ export class ShaderRenderer {
         this.canvas.addEventListener('mousemove', this._onMouseMove);
         this.canvas.addEventListener('mousedown', this._onMouseDown);
         this.canvas.addEventListener('mouseup', this._onMouseUp);
+    }
+
+    /** Update the cached MusiCue bundle uniforms. Called per frame by preview-panel. */
+    updateBundleUniforms(u) {
+        if (!u) return;
+        this.bundleUniforms = {
+            bpm: u.bpm || 0,
+            beat: u.beat || 0,
+            bar: u.bar || 0,
+            energy: u.energy || 0,
+            sectionEnergy: u.sectionEnergy || 0,
+        };
     }
 
     compileShader(source) {
@@ -118,6 +134,14 @@ export class ShaderRenderer {
             iCameraTiltDeg: gl.getUniformLocation(this.program, 'iCameraTiltDeg'),
             iJitter: gl.getUniformLocation(this.program, 'iJitter'),
             iSampleIndex: gl.getUniformLocation(this.program, 'iSampleIndex'),
+            // MusiCue bundle uniforms (preview binding — match headers in
+            // shaders/common/header.glsl so the same shader source runs
+            // both here and in the headless renderer).
+            iBpm: gl.getUniformLocation(this.program, 'iBpm'),
+            iBeat: gl.getUniformLocation(this.program, 'iBeat'),
+            iBar: gl.getUniformLocation(this.program, 'iBar'),
+            iSectionEnergy: gl.getUniformLocation(this.program, 'iSectionEnergy'),
+            iEnergy: gl.getUniformLocation(this.program, 'iEnergy'),
         };
 
         // Get array uniform locations
@@ -178,7 +202,13 @@ export class ShaderRenderer {
         finalShader += 'uniform int iCameraMode;\n';
         finalShader += 'uniform float iCameraTiltDeg;\n';
         finalShader += 'uniform vec2 iJitter;\n';
-        finalShader += 'uniform int iSampleIndex;\n\n';
+        finalShader += 'uniform int iSampleIndex;\n';
+        finalShader += '// MusiCue bundle uniforms (same shape as shaders/common/header.glsl)\n';
+        finalShader += 'uniform float iBpm;\n';
+        finalShader += 'uniform float iBeat;\n';
+        finalShader += 'uniform int   iBar;\n';
+        finalShader += 'uniform float iSectionEnergy;\n';
+        finalShader += 'uniform float iEnergy;\n\n';
         finalShader += 'out vec4 fragColor;\n\n';
 
         // Add CedarToy camera helper functions
@@ -344,6 +374,14 @@ vec3 cameraDirLL180(vec2 uv, float tiltDeg, mat3 camBasis) {
         if (this.uniforms.iSampleIndex !== null) {
             gl.uniform1i(this.uniforms.iSampleIndex, 0);
         }
+
+        // MusiCue bundle uniforms (set from the most recent transport-frame).
+        const bu = this.bundleUniforms || { bpm: 0, beat: 0, bar: 0, energy: 0, sectionEnergy: 0 };
+        if (this.uniforms.iBpm !== null) gl.uniform1f(this.uniforms.iBpm, bu.bpm);
+        if (this.uniforms.iBeat !== null) gl.uniform1f(this.uniforms.iBeat, bu.beat);
+        if (this.uniforms.iBar !== null) gl.uniform1i(this.uniforms.iBar, bu.bar | 0);
+        if (this.uniforms.iSectionEnergy !== null) gl.uniform1f(this.uniforms.iSectionEnergy, bu.sectionEnergy);
+        if (this.uniforms.iEnergy !== null) gl.uniform1f(this.uniforms.iEnergy, bu.energy);
 
         // Draw
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
