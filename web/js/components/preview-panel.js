@@ -122,18 +122,24 @@ class PreviewPanel extends HTMLElement {
     }
 
     async loadShader(path) {
+        const errorDiv = this.querySelector('#preview-error');
+        errorDiv.style.display = 'none';
+        let ok = true;
+        let log = '';
         try {
-            const errorDiv = this.querySelector('#preview-error');
-            errorDiv.style.display = 'none';
             const shaderData = await api.getShader(path);
             this.renderer.compileShader(shaderData.source);
             this.renderer.render();
         } catch (err) {
+            ok = false;
+            log = err && err.message ? err.message : String(err);
             console.error('Failed to load shader:', err);
-            const errorDiv = this.querySelector('#preview-error');
-            errorDiv.textContent = `Shader Error: ${err.message}`;
+            errorDiv.textContent = `Shader Error: ${log}`;
             errorDiv.style.display = 'block';
         }
+        document.dispatchEvent(new CustomEvent('shader-compile-result', {
+            detail: { ok, log, path },
+        }));
     }
 }
 
