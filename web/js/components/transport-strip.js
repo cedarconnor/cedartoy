@@ -16,6 +16,44 @@ class TransportStrip extends HTMLElement {
         this._attachListeners();
         document.addEventListener('project-loaded', (e) => this._onProjectLoaded(e.detail));
         document.addEventListener('transport-seek', (e) => this._seek(e.detail.t));
+        document.addEventListener('keydown', (e) => this._onKey(e));
+    }
+
+    _onKey(e) {
+        // Only when focus is on body or transport-strip itself — never in inputs/textareas.
+        const t = e.target;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
+            return;
+        }
+        if (e.code === 'Space') {
+            e.preventDefault();
+            this._togglePlay();
+        } else if (e.code === 'ArrowLeft') {
+            e.preventDefault();
+            this._seek((this.audio?.currentTime || 0) - 1);
+        } else if (e.code === 'ArrowRight') {
+            e.preventDefault();
+            this._seek((this.audio?.currentTime || 0) + 1);
+        } else if (e.code === 'BracketLeft') {
+            e.preventDefault();
+            this._jumpSection(-1);
+        } else if (e.code === 'BracketRight') {
+            e.preventDefault();
+            this._jumpSection(+1);
+        }
+    }
+
+    _jumpSection(dir) {
+        if (!this.audio || !this.bundle?.sections?.length) return;
+        const t = this.audio.currentTime;
+        const starts = this.bundle.sections.map(s => s.start);
+        let target = null;
+        if (dir < 0) {
+            target = [...starts].reverse().find(s => s < t - 0.1) ?? 0;
+        } else {
+            target = starts.find(s => s > t + 0.1) ?? t;
+        }
+        this._seek(target);
     }
 
     render() {
