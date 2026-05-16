@@ -13,9 +13,12 @@ class ProjectPanel extends HTMLElement {
 
     render() {
         const p = this.project;
-        const banner = p && p.bundle_sha_matches_audio === false
-            ? `<div class="project-warning">⚠ Bundle sha does not match audio — re-export from MusiCue, or proceed knowing the bundle was built against different audio.</div>`
-            : '';
+        let banner = '';
+        if (p && p.bundle_sha_matches_audio === false) {
+            banner = `<div class="project-warning">⚠ Audio has changed since MusiCue exported it. Re-export from MusiCue for fresh bundle data.</div>`;
+        } else if (p && p.bundle_sha_matches_audio === null && (p.warnings || []).some(w => w.toLowerCase().includes('schema 1.0'))) {
+            banner = `<div class="project-row project-row-info">ℹ Bundle schema 1.0 — audio integrity check unavailable. Re-export from MusiCue for schema 1.1.</div>`;
+        }
 
         let rows = '';
         if (p) {
