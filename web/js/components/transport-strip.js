@@ -84,16 +84,19 @@ class TransportStrip extends HTMLElement {
         }
 
         this.audio = new Audio(detail.audio_url);
-        this.audio.crossOrigin = 'anonymous';
         this.audio.preload = 'auto';
         this.audio.addEventListener('loadedmetadata', () => {
             this.duration = this.audio.duration;
-            this._updateTime(0);
-            const btn = this.querySelector('#ts-play');
-            btn.disabled = false;
-            btn.title = '';
+            this._updateTime(this.audio.currentTime || 0);
         });
         this.audio.addEventListener('ended', () => this._pause());
+        // Enable play button immediately. audio.play() waits for data
+        // internally; gating the button on loadedmetadata creates a
+        // deadlock with Chrome's autoplay policy (the load won't
+        // really start until user interaction).
+        const btn = this.querySelector('#ts-play');
+        btn.disabled = false;
+        btn.title = '';
 
         if (detail.bundle_path) {
             try {
