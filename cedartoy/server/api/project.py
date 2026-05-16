@@ -23,9 +23,12 @@ def project_load(body: ProjectLoadRequest) -> dict:
     if not p.exists():
         raise HTTPException(status_code=404, detail=f"path does not exist: {p}")
     proj = load_project(p)
+    audio_path_str = str(proj.audio_path) if proj.audio_path else None
+    audio_url = f"/api/project/audio?path={audio_path_str}" if audio_path_str else None
     return {
         "folder": str(proj.folder),
-        "audio_path": str(proj.audio_path) if proj.audio_path else None,
+        "audio_path": audio_path_str,
+        "audio_url": audio_url,
         "bundle_path": str(proj.bundle_path) if proj.bundle_path else None,
         "stems_paths": {k: str(v) for k, v in proj.stems_paths.items()},
         "manifest": proj.manifest,

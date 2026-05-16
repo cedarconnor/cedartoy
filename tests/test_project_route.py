@@ -138,6 +138,18 @@ def test_project_waveform_404_when_missing(client, tmp_path):
     assert resp.status_code == 404
 
 
+def test_project_load_includes_audio_url(client, tmp_path):
+    """The load response includes a browser-fetchable URL for the audio."""
+    folder = tmp_path / "song"
+    _seed(folder)
+    resp = client.post("/api/project/load", json={"path": str(folder)})
+    body = resp.json()
+    assert resp.status_code == 200
+    assert body["audio_url"] is not None
+    # audio_url echoes the resolved audio_path so the browser can fetch it.
+    assert body["audio_url"] == f"/api/project/audio?path={body['audio_path']}"
+
+
 def test_project_load_for_send_to_cedartoy_folder(client, tmp_path):
     """E2E: CedarToy reads a folder produced by MusiCue's send-to-cedartoy."""
     folder = tmp_path / "exported"
