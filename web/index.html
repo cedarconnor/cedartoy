@@ -29,10 +29,28 @@
 
             <section class="config-editor-panel">
                 <div id="stage-panels">
-                    <div data-stage="project"><project-panel></project-panel></div>
-                    <div data-stage="shader" hidden><config-editor></config-editor></div>
-                    <div data-stage="output" hidden><output-panel></output-panel></div>
+                    <div data-stage="project">
+                        <stage-helper
+                            title="Stage 1 · Project"
+                            subtitle="Load a folder produced by MusiCue's Send to CedarToy. CedarToy reads the bundle, links audio, and shows you what's inside before you commit to a render."></stage-helper>
+                        <project-panel></project-panel>
+                    </div>
+                    <div data-stage="shader" hidden>
+                        <stage-helper
+                            title="Stage 2 · Shader"
+                            subtitle="Pick a shader from the rail. Make this shader reactive ▸ copies a Claude-ready prompt that retrofits MusiCue uniforms (iBpm, iBeat, iEnergy…) onto it."></stage-helper>
+                        <config-editor></config-editor>
+                    </div>
+                    <div data-stage="output" hidden>
+                        <stage-helper
+                            title="Stage 3 · Output"
+                            subtitle="Pick a preset, set duration, glance at the estimate. The estimate sharpens after each real render of this shader."></stage-helper>
+                        <output-panel></output-panel>
+                    </div>
                     <div data-stage="render" hidden>
+                        <stage-helper
+                            title="Stage 4 · Render"
+                            subtitle="Start Render below. Progress streams over WebSocket; completed renders list every emitted frame."></stage-helper>
                         <div style="padding: 16px; color: #aaa;">
                             Use the Render panel at the bottom of the page to start your render.
                         </div>
@@ -61,6 +79,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/clike/clike.min.js"></script>
 
     <!-- App Scripts -->
-    <script type="module" src="/js/app.js?v=6"></script>
+    <script type="module" src="/js/app.js?v=7"></script>
 </body>
 </html>
