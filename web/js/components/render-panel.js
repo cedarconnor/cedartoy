@@ -113,10 +113,22 @@ class RenderPanel extends HTMLElement {
         }
 
         if (openBtn) {
-            openBtn.addEventListener('click', () => {
-                if (this.outputDir) {
-                    // Open folder in file explorer (Windows)
-                    window.open(`file:///${this.outputDir}`, '_blank');
+            openBtn.addEventListener('click', async () => {
+                if (!this.outputDir) return;
+                // Browsers block file:// from http:// origins; ask the server
+                // to open the folder via the OS shell.
+                try {
+                    const resp = await fetch('/api/dialog/open-folder', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ path: this.outputDir }),
+                    });
+                    if (!resp.ok) {
+                        const detail = await resp.json().catch(() => ({}));
+                        console.error('Open Folder failed:', detail.detail || resp.status);
+                    }
+                } catch (e) {
+                    console.error('Open Folder request failed:', e);
                 }
             });
         }

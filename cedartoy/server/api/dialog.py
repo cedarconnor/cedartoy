@@ -7,7 +7,11 @@ requests keep flowing.
 """
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import tkinter as tk
+from pathlib import Path
 from tkinter import filedialog
 
 from fastapi import APIRouter, HTTPException
@@ -18,6 +22,10 @@ router = APIRouter()
 
 class PickFolderRequest(BaseModel):
     initial_dir: str | None = Field(default=None)
+
+
+class OpenFolderRequest(BaseModel):
+    path: str = Field(..., description="Absolute path of the folder to reveal.")
 
 
 def _ask_directory(*, initial_dir: str | None = None) -> str:
@@ -54,3 +62,35 @@ def pick_folder(body: PickFolderRequest) -> dict:
             detail=f"Native dialog unavailable (no display): {e}",
         ) from e
     return {"path": chosen if chosen else None}
+
+
+def _reveal_in_file_manager(path: Path) -> None:
+    """Open the folder in the OS file manager.
+
+    Browsers block file:// navigation from http:// origins, so this must
+    happen server-side. Isolated for test mocking.
+    """
+    if sys.platform == "win32":
+        os.startfile(str(path))  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.run(["open", str(path)], check=True)
+    else:
+        subprocess.run(["xdg-open", str(path)], check=True)
+
+
+@router.post("/open-folder")
+def open_folder(body: OpenFolderRequest) -> dict:
+    """Reveal a folder in the OS file manager.
+
+    Used by the render-panel's "Open Folder" button after a render completes.
+    """
+    p = Path(body.path)
+    if not p.exists():
+        raise HTTPException(status_code=404, detail=f"path does not exist: {p}")
+    if not p.is_dir():
+        raise HTTPException(status_code=400, detail=f"not a directory: {p}")
+    try:
+        _reveal_in_file_manager(p)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to open folder: {e}") from e
+    return {"opened": str(p)}

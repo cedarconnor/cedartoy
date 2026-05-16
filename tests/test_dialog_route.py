@@ -54,3 +54,24 @@ def test_pick_folder_503_when_no_display(client):
         resp = client.post("/api/dialog/pick-folder", json={})
     assert resp.status_code == 503
     assert "display" in resp.json()["detail"].lower()
+
+
+def test_open_folder_reveals_existing_dir(client, tmp_path):
+    """Happy path: existing folder -> 200, OS shell called with that path."""
+    with patch("cedartoy.server.api.dialog._reveal_in_file_manager") as m:
+        resp = client.post("/api/dialog/open-folder", json={"path": str(tmp_path)})
+    assert resp.status_code == 200
+    assert resp.json()["opened"] == str(tmp_path)
+    m.assert_called_once()
+
+
+def test_open_folder_404_when_missing(client, tmp_path):
+    resp = client.post("/api/dialog/open-folder", json={"path": str(tmp_path / "nope")})
+    assert resp.status_code == 404
+
+
+def test_open_folder_400_when_not_a_directory(client, tmp_path):
+    f = tmp_path / "file.txt"
+    f.write_text("hi")
+    resp = client.post("/api/dialog/open-folder", json={"path": str(f)})
+    assert resp.status_code == 400
