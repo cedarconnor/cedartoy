@@ -5,64 +5,52 @@ class PreviewPanel extends HTMLElement {
     constructor() {
         super();
         this.renderer = null;
-        this.duration = 10.0;
-        this.playing = false;
     }
 
     connectedCallback() {
         this.render();
         this.attachEventListeners();
 
-        // Initialize WebGL
         const canvas = this.querySelector('#preview-canvas');
         this.renderer = new ShaderRenderer(canvas);
 
-        // Listen for shader selection
         document.addEventListener('shader-select', async (e) => {
             await this.loadShader(e.detail.path);
         });
 
-        // Listen for audio data updates
         document.addEventListener('audio-data', (e) => {
             if (this.renderer) {
                 this.renderer.updateAudioData(e.detail.fft, e.detail.waveform);
             }
         });
 
-        // Sync camera settings with config editor
-        document.addEventListener('config-change', (e) => {
-            const config = e.detail;
-            const modeMap = { '2d': 0, 'equirect': 1, 'll180': 2 };
-
-            if (config.camera_mode && this.renderer) {
-                const modeIndex = modeMap[config.camera_mode] || 0;
-                this.renderer.cameraMode = modeIndex;
-                const cameraModeSelect = this.querySelector('#camera-mode');
-                if (cameraModeSelect) cameraModeSelect.value = modeIndex;
-            }
-
-            // Support both new flat format (camera_tilt_deg) and old nested format
-            const tiltValue = config.camera_tilt_deg ?? config.camera_params?.tilt_deg;
-            if (tiltValue !== undefined && this.renderer) {
-                this.renderer.cameraTilt = tiltValue;
-                const cameraTiltSlider = this.querySelector('#camera-tilt');
-                const tiltDisplay = this.querySelector('#tilt-display');
-                if (cameraTiltSlider) cameraTiltSlider.value = tiltValue;
-                if (tiltDisplay) tiltDisplay.textContent = `${tiltValue}°`;
-            }
-
-            // Re-render with updated settings
-            if (!this.playing && this.renderer) {
+        // Transport-strip drives time; preview-panel is a passive subscriber.
+        document.addEventListener('transport-frame', (e) => {
+            if (this.renderer) {
+                this.renderer.currentTime = e.detail.timeSec || 0;
                 this.renderer.render();
             }
         });
-    }
 
-    disconnectedCallback() {
-        if (this._updateInterval) {
-            clearInterval(this._updateInterval);
-            this._updateInterval = null;
-        }
+        document.addEventListener('config-change', (e) => {
+            const config = e.detail;
+            const modeMap = { '2d': 0, 'equirect': 1, 'll180': 2 };
+            if (config.camera_mode && this.renderer) {
+                const modeIndex = modeMap[config.camera_mode] ?? 0;
+                this.renderer.cameraMode = modeIndex;
+                const sel = this.querySelector('#camera-mode');
+                if (sel) sel.value = modeIndex;
+            }
+            const tiltValue = config.camera_tilt_deg ?? config.camera_params?.tilt_deg;
+            if (tiltValue !== undefined && this.renderer) {
+                this.renderer.cameraTilt = tiltValue;
+                const slider = this.querySelector('#camera-tilt');
+                const disp = this.querySelector('#tilt-display');
+                if (slider) slider.value = tiltValue;
+                if (disp) disp.textContent = `${tiltValue}°`;
+            }
+            if (this.renderer) this.renderer.render();
+        });
     }
 
     render() {
@@ -75,12 +63,6 @@ class PreviewPanel extends HTMLElement {
                     <div id="preview-error" style="display: none; position: absolute; top: 50%; left: 50%;
                         transform: translate(-50%, -50%); color: var(--error); font-weight: bold;">
                     </div>
-                </div>
-                <div class="preview-controls" style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
-                    <button class="btn btn-primary" id="play-btn">▶</button>
-                    <input type="range" id="time-slider" min="0" max="1000" value="0"
-                        style="flex: 1;">
-                    <span id="time-display">00:00 / ${this.formatTime(this.duration)}</span>
                 </div>
                 <div class="camera-controls" style="margin-top: 8px; padding: 8px; background: var(--bg-secondary); border-radius: 4px;">
                     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
@@ -106,95 +88,35 @@ class PreviewPanel extends HTMLElement {
     }
 
     attachEventListeners() {
-        const playBtn = this.querySelector('#play-btn');
-        const timeSlider = this.querySelector('#time-slider');
         const cameraModeSelect = this.querySelector('#camera-mode');
         const cameraTiltSlider = this.querySelector('#camera-tilt');
         const tiltDisplay = this.querySelector('#tilt-display');
 
-        playBtn.addEventListener('click', () => {
-            this.togglePlay();
-        });
-
-        timeSlider.addEventListener('input', (e) => {
-            const time = (parseFloat(e.target.value) / 1000) * this.duration;
-            this.renderer.seek(time);
-            this.updateTimeDisplay();
-
-            // Emit seek event for audio sync
-            document.dispatchEvent(new CustomEvent('preview-seek', {
-                detail: { time }
-            }));
-        });
-
-        // Camera mode control - update renderer and sync to config editor
         cameraModeSelect.addEventListener('change', (e) => {
             const modeIndex = parseInt(e.target.value);
             if (this.renderer) {
                 this.renderer.cameraMode = modeIndex;
-                // Re-render with new camera mode
-                if (!this.playing) {
-                    this.renderer.render();
-                }
+                this.renderer.render();
             }
-            // Sync to config editor
             const modeNames = ['2d', 'equirect', 'll180'];
-            const configEditor = document.querySelector('config-editor');
-            if (configEditor) {
-                configEditor.config.camera_mode = modeNames[modeIndex];
-                configEditor.saveToLocalStorage();
-                // Update config editor UI
-                const selectEl = configEditor.querySelector('select[name="camera_mode"]');
-                if (selectEl) selectEl.value = modeNames[modeIndex];
+            const ce = document.querySelector('config-editor');
+            if (ce) {
+                ce.config.camera_mode = modeNames[modeIndex];
+                ce.saveToLocalStorage();
             }
         });
 
-        // Camera tilt control - update renderer and sync to config editor
         cameraTiltSlider.addEventListener('input', (e) => {
             const tilt = parseFloat(e.target.value);
             tiltDisplay.textContent = `${tilt}°`;
             if (this.renderer) {
                 this.renderer.cameraTilt = tilt;
-                // Re-render with new tilt
-                if (!this.playing) {
-                    this.renderer.render();
-                }
+                this.renderer.render();
             }
-            // Sync to config editor (use flat camera_tilt_deg format)
-            const configEditor = document.querySelector('config-editor');
-            if (configEditor) {
-                configEditor.config.camera_tilt_deg = tilt;
-                configEditor.saveToLocalStorage();
-                // Update config editor UI
-                const inputEl = configEditor.querySelector('input[name="camera_tilt_deg"]');
-                if (inputEl) inputEl.value = tilt;
-            }
-        });
-
-        // Update slider during playback + emit preview-frame for the cue scrubber.
-        this._updateInterval = setInterval(() => {
-            if (this.playing && this.renderer) {
-                const progress = (this.renderer.currentTime / this.duration) * 1000;
-                timeSlider.value = Math.min(progress, 1000);
-                this.updateTimeDisplay();
-                document.dispatchEvent(new CustomEvent('preview-frame', {
-                    detail: { timeSec: this.renderer.currentTime },
-                }));
-            }
-        }, 100);
-
-        // Cue scrubber click-to-seek: jump preview playhead to a given time.
-        document.addEventListener('scrubber-seek', (e) => {
-            const t = Math.max(0, Math.min(this.duration, e.detail.t));
-            if (this.renderer) {
-                this.renderer.currentTime = t;
-                // Mirror into the time slider so the UI matches.
-                const slider = this.querySelector('#time-slider');
-                if (slider) slider.value = Math.min((t / this.duration) * 1000, 1000);
-                this.updateTimeDisplay();
-                document.dispatchEvent(new CustomEvent('preview-frame', {
-                    detail: { timeSec: t },
-                }));
+            const ce = document.querySelector('config-editor');
+            if (ce) {
+                ce.config.camera_tilt_deg = tilt;
+                ce.saveToLocalStorage();
             }
         });
     }
@@ -203,49 +125,15 @@ class PreviewPanel extends HTMLElement {
         try {
             const errorDiv = this.querySelector('#preview-error');
             errorDiv.style.display = 'none';
-
             const shaderData = await api.getShader(path);
             this.renderer.compileShader(shaderData.source);
-            this.renderer.render(); // Render first frame
-
-            console.log('Shader loaded successfully');
+            this.renderer.render();
         } catch (err) {
             console.error('Failed to load shader:', err);
             const errorDiv = this.querySelector('#preview-error');
             errorDiv.textContent = `Shader Error: ${err.message}`;
             errorDiv.style.display = 'block';
         }
-    }
-
-    togglePlay() {
-        this.playing = !this.playing;
-        const playBtn = this.querySelector('#play-btn');
-
-        if (this.playing) {
-            this.renderer.play();
-            playBtn.textContent = '⏸';
-
-            // Emit play event for audio sync
-            document.dispatchEvent(new CustomEvent('preview-play'));
-        } else {
-            this.renderer.pause();
-            playBtn.textContent = '▶';
-
-            // Emit pause event for audio sync
-            document.dispatchEvent(new CustomEvent('preview-pause'));
-        }
-    }
-
-    updateTimeDisplay() {
-        const timeDisplay = this.querySelector('#time-display');
-        const current = this.renderer.currentTime;
-        timeDisplay.textContent = `${this.formatTime(current)} / ${this.formatTime(this.duration)}`;
-    }
-
-    formatTime(seconds) {
-        const min = Math.floor(seconds / 60);
-        const sec = Math.floor(seconds % 60);
-        return `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
     }
 }
 
