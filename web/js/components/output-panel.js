@@ -82,57 +82,91 @@ class OutputPanel extends HTMLElement {
         const bitDepth = String(this.config.default_bit_depth || '8');
         this.innerHTML = `
             <div class="output-panel">
-                <h3>Output</h3>
+                <div class="output-grid">
 
-                <label>Output preset</label>
-                <select id="output-preset">
-                    <option value="equirect" ${preset==='equirect'?'selected':''}>Equirectangular 2:1 (recommended)</option>
-                    <option value="ll180" ${preset==='ll180'?'selected':''}>LL180 dome</option>
-                    <option value="2d" ${preset==='2d'?'selected':''}>Flat 16:9 (preview / test only)</option>
-                </select>
-                <button class="btn btn-secondary" id="apply-preset"
-                        style="margin-left:8px;padding:4px 10px;font-size:12px;">Apply preset</button>
+                    <div class="output-card">
+                        <div class="output-card-title">Geometry</div>
+                        <div class="output-row">
+                            <label title="Spherical output unwraps the shader onto a 2:1 rectangle for VR / dome. Flat 16:9 is a quick preview only.">Preset</label>
+                            <select id="output-preset" title="Spherical presets (equirect / LL180) are the production-quality options for CedarToy.">
+                                <option value="equirect" ${preset==='equirect'?'selected':''}>Equirectangular 2:1</option>
+                                <option value="ll180" ${preset==='ll180'?'selected':''}>LL180 dome</option>
+                                <option value="2d" ${preset==='2d'?'selected':''}>Flat 16:9 (preview)</option>
+                            </select>
+                            <button class="btn btn-secondary" id="apply-preset"
+                                    style="padding:2px 8px;font-size:11px;"
+                                    title="Apply this preset's recommended resolution (e.g. 8192×4096 for equirect).">Apply preset</button>
+                        </div>
+                        <div class="output-row">
+                            <label title="Output resolution in pixels. Equirect → 8192×4096 is a common stage; LL180 → 4096×4096.">Resolution</label>
+                            <input id="out-width" type="number" value="${this.config.width||1920}" min="64" max="32768" title="Width in pixels.">
+                            <span style="color:#666;">×</span>
+                            <input id="out-height" type="number" value="${this.config.height||1080}" min="64" max="32768" title="Height in pixels.">
+                        </div>
+                        <div class="output-row">
+                            <label title="Camera tilt for spherical projection, in degrees. 0° = horizon centered.">Tilt</label>
+                            <input id="out-tilt" type="number" min="0" max="90" value="${this.config.camera_tilt_deg||0}" title="Camera tilt in degrees (0–90).">
+                            <span style="color:#666;">°</span>
+                        </div>
+                    </div>
 
-                <label>Resolution</label>
-                <input id="out-width" type="number" value="${this.config.width||1920}" min="64" max="32768">
-                <span style="color:#666;">x</span>
-                <input id="out-height" type="number" value="${this.config.height||1080}" min="64" max="32768">
+                    <div class="output-card">
+                        <div class="output-card-title">Time</div>
+                        <div class="output-row">
+                            <label title="Frames per second. 60 is common for smooth motion; 24 for cinematic feel.">FPS</label>
+                            <input id="out-fps" type="number" value="${this.config.fps||60}" min="1" max="240" title="Frames per second.">
+                        </div>
+                        <div class="output-row">
+                            <label title="Render duration in seconds. Total frames = FPS × Duration.">Duration</label>
+                            <input id="out-duration" type="number" step="0.1" value="${this.config.duration_sec||10}" min="0.05" title="Render duration in seconds.">
+                            <span style="color:#666;">s</span>
+                        </div>
+                    </div>
 
-                <label>FPS</label>
-                <input id="out-fps" type="number" value="${this.config.fps||60}" min="1" max="240">
+                    <div class="output-card">
+                        <div class="output-card-title">Quality</div>
+                        <div class="output-row">
+                            <label title="Render each pixel at N× resolution then downsample. 2 quadruples render cost but greatly reduces aliasing.">Supersample</label>
+                            <input id="out-ss" type="number" min="1" max="4" step="0.5" value="${this.config.ss_scale||1.0}" title="Supersampling scale (1 = off, 2 = 4× cost).">
+                        </div>
+                        <div class="output-row">
+                            <label title="Number of sub-frames per output frame (motion blur). ≥ 2 enables motion blur; cost scales linearly.">Temporal</label>
+                            <input id="out-temporal" type="number" min="1" max="64" value="${this.config.temporal_samples||1}" title="Temporal samples per frame (1 = off, ≥ 2 = motion blur).">
+                        </div>
+                        <div class="output-row">
+                            <label title="Shutter angle 0–1. Only used when Temporal ≥ 2. 0.5 = 180° shutter (filmic default).">Shutter</label>
+                            <input id="out-shutter" type="number" min="0" max="1" step="0.1" value="${this.config.shutter ?? 0.5}" title="Shutter angle (0–1). Used with Temporal ≥ 2.">
+                        </div>
+                        <div class="output-row">
+                            <label title="Split rendering into tiles to fit huge frames in GPU memory. Total frames in the job = tiles_x × tiles_y × time_frames.">Tiling</label>
+                            <input id="out-tiles-x" type="number" min="1" max="64" value="${this.config.tiles_x||1}" title="Horizontal tiles.">
+                            <span style="color:#666;">×</span>
+                            <input id="out-tiles-y" type="number" min="1" max="64" value="${this.config.tiles_y||1}" title="Vertical tiles.">
+                        </div>
+                    </div>
 
-                <label>Duration (seconds)</label>
-                <input id="out-duration" type="number" step="0.1" value="${this.config.duration_sec||10}" min="0.05">
+                    <div class="output-card">
+                        <div class="output-card-title">File</div>
+                        <div class="output-row">
+                            <label title="Output image format. PNG is lossless 8-bit/16-bit; EXR carries 16- or 32-bit float for HDR pipelines.">Format</label>
+                            <select id="out-format" title="PNG for delivery; EXR for HDR / compositing.">
+                                <option value="png" ${this.config.default_output_format==='png'?'selected':''}>PNG</option>
+                                <option value="exr" ${this.config.default_output_format==='exr'?'selected':''}>EXR</option>
+                            </select>
+                        </div>
+                        <div class="output-row">
+                            <label title="Color depth per channel. 8-bit suits PNG; 16-bit / 32-bit float require EXR.">Bit depth</label>
+                            <select id="out-bit-depth" title="8-bit (PNG) / 16-bit float (EXR) / 32-bit float (EXR).">
+                                <option value="8" ${bitDepth==='8'?'selected':''}>8-bit</option>
+                                <option value="16f" ${bitDepth==='16f'?'selected':''}>16-bit float</option>
+                                <option value="32f" ${bitDepth==='32f'?'selected':''}>32-bit float</option>
+                            </select>
+                        </div>
+                    </div>
 
-                <label>Tiling</label>
-                <input id="out-tiles-x" type="number" min="1" max="64" value="${this.config.tiles_x||1}">
-                <span style="color:#666;">x</span>
-                <input id="out-tiles-y" type="number" min="1" max="64" value="${this.config.tiles_y||1}">
+                </div>
 
-                <label>Camera tilt (degrees)</label>
-                <input id="out-tilt" type="number" min="0" max="90" value="${this.config.camera_tilt_deg||0}">
-
-                <label>Supersampling scale</label>
-                <input id="out-ss" type="number" min="1" max="4" step="0.5" value="${this.config.ss_scale||1.0}">
-
-                <label>Temporal samples (motion blur)</label>
-                <input id="out-temporal" type="number" min="1" max="64" value="${this.config.temporal_samples||1}">
-
-                <label>Shutter angle (0-1)</label>
-                <input id="out-shutter" type="number" min="0" max="1" step="0.1" value="${this.config.shutter ?? 0.5}">
-
-                <label>Format</label>
-                <select id="out-format">
-                    <option value="png" ${this.config.default_output_format==='png'?'selected':''}>PNG</option>
-                    <option value="exr" ${this.config.default_output_format==='exr'?'selected':''}>EXR</option>
-                </select>
-                <select id="out-bit-depth">
-                    <option value="8" ${bitDepth==='8'?'selected':''}>8-bit</option>
-                    <option value="16f" ${bitDepth==='16f'?'selected':''}>16-bit float</option>
-                    <option value="32f" ${bitDepth==='32f'?'selected':''}>32-bit float</option>
-                </select>
-
-                <div id="render-estimate">Estimate: pending (Plan B-2)</div>
+                <div id="render-estimate" class="output-estimate">Estimate: pick a shader and resolution.</div>
             </div>
         `;
     }
@@ -193,8 +227,6 @@ class OutputPanel extends HTMLElement {
             default_output_format: this.querySelector('#out-format').value,
             default_bit_depth: this.querySelector('#out-bit-depth').value,
         };
-        // Push updates into the source-of-truth config-editor so localStorage
-        // and downstream consumers stay in sync.
         const ce = document.querySelector('config-editor');
         if (ce && ce.config) {
             Object.assign(ce.config, update);
