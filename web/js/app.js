@@ -10,7 +10,7 @@ import './components/stage-rail.js?v=1';
 import './components/stage-helper.js?v=1';
 import './components/shader-reactivity-drawer.js?v=1';
 import './components/project-panel.js?v=3';
-import './components/output-panel.js?v=3';
+import './components/output-panel.js?v=4';
 import './components/cue-scrubber.js?v=3';
 
 // Global app state

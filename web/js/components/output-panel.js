@@ -113,8 +113,22 @@ class OutputPanel extends HTMLElement {
                     <div class="output-card">
                         <div class="output-card-title">Time</div>
                         <div class="output-row">
-                            <label title="Frames per second. 60 is common for smooth motion; 24 for cinematic feel.">FPS</label>
-                            <input id="out-fps" type="number" value="${this.config.fps||60}" min="1" max="240" title="Frames per second.">
+                            <label title="Frames per second. Standard film/broadcast rates: 23.976, 24, 25, 29.97, 30, 50, 59.94, 60. Decimals are honored — type any rate, or pick one from the list.">FPS</label>
+                            <input id="out-fps" type="number" step="0.001" list="fps-options"
+                                   value="${this.config.fps||60}" min="1" max="240"
+                                   title="Frames per second. Standard rates listed; type any decimal.">
+                            <datalist id="fps-options">
+                                <option value="23.976"></option>
+                                <option value="24"></option>
+                                <option value="25"></option>
+                                <option value="29.97"></option>
+                                <option value="30"></option>
+                                <option value="48"></option>
+                                <option value="50"></option>
+                                <option value="59.94"></option>
+                                <option value="60"></option>
+                                <option value="120"></option>
+                            </datalist>
                         </div>
                         <div class="output-row">
                             <label title="Render duration in seconds. Total frames = FPS × Duration.">Duration</label>
@@ -216,7 +230,7 @@ class OutputPanel extends HTMLElement {
             camera_mode: this.querySelector('#output-preset').value,
             width: parseInt(this.querySelector('#out-width').value),
             height: parseInt(this.querySelector('#out-height').value),
-            fps: parseInt(this.querySelector('#out-fps').value),
+            fps: parseFloat(this.querySelector('#out-fps').value),
             duration_sec: parseFloat(this.querySelector('#out-duration').value),
             tiles_x: parseInt(this.querySelector('#out-tiles-x').value),
             tiles_y: parseInt(this.querySelector('#out-tiles-y').value),

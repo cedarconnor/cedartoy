@@ -212,46 +212,32 @@ vec3 cameraDirEquirect(vec2 uv, mat3 camBasis) {
 }
 
 // LL180 dome projection (latitude-longitude 180-degree)
-// Uses proper spherical coordinate mapping with latitude offset for horizon tilt
-// This creates the curved horizon distortion effect
+// Matches shaders/common/header.glsl (headless render path) so preview and
+// final render produce the same image. Each axis independently sweeps 180°:
+// lon = (u·2 − 1) · π/2  and  lat = (v·2 − 1) · π/2. Tilt is an X-axis
+// rotation applied to the local direction before the camera basis transform.
 vec3 cameraDirLL180(vec2 uv, float tiltDeg, mat3 camBasis) {
-    // Convert UV to centered coordinates [-1, 1]
-    vec2 centered = (uv * 2.0 - 1.0);
+    float lon = (uv.x * 2.0 - 1.0) * HALFPI;  // -pi/2 .. pi/2
+    float lat = (uv.y * 2.0 - 1.0) * HALFPI;  // -pi/2 .. pi/2
 
-    // Calculate radial distance from center and azimuth angle
-    float r = length(centered);
-    float azimuth = atan(centered.y, centered.x);
+    vec3 dirLocal;
+    dirLocal.x = cos(lat) * sin(lon);
+    dirLocal.y = sin(lat);
+    dirLocal.z = cos(lat) * cos(lon);
 
-    // Clamp radius to hemisphere (avoid pixels outside the dome circle)
-    r = min(r, 1.0);
+    // X-axis tilt rotation (negative so positive tiltDeg tilts the dome up,
+    // matching the headless renderer's convention).
+    float tiltRad = radians(-tiltDeg);
+    float c = cos(tiltRad);
+    float s = sin(tiltRad);
+    mat3 tiltX = mat3(
+        1.0, 0.0, 0.0,
+        0.0,  c, -s,
+        0.0,  s,  c
+    );
 
-    // LL180 hemisphere projection in spherical coordinates:
-    // r maps to angular distance from view center (0° at center, 90° at edge)
-    float theta = r * HALFPI;
-
-    // Compute latitude with tilt offset applied in 2D spherical space
-    // This is the key to creating the curved horizon effect!
-    // tilt=0: center at horizon (lat=0°), edge at nadir (lat=-90°)
-    // tilt=65: center at 65° above horizon, horizon curves at ~72% radius
-    // tilt=90: center at zenith (lat=90°), horizon at edge
-    float lat = radians(tiltDeg) - theta;
-
-    // Longitude is the azimuthal angle around the view center
-    float lon = azimuth;
-
-    // Clamp latitude to valid range to avoid artifacts
-    lat = clamp(lat, -HALFPI, HALFPI);
-
-    // Convert spherical (lat, lon) to 3D Cartesian
-    // World coordinates: Y=up, Z=forward, X=right
-    vec3 dir;
-    dir.x = cos(lat) * sin(lon);   // right/left
-    dir.y = sin(lat);               // up/down
-    dir.z = cos(lat) * cos(lon);   // forward/back
-
-    // Note: We compute direction directly in world space, ignoring camBasis
-    // This ensures tilt=0 looks at horizon regardless of shader's dome orientation
-    return normalize(dir);
+    dirLocal = tiltX * dirLocal;
+    return normalize(camBasis * dirLocal);
 }
 
 `;
