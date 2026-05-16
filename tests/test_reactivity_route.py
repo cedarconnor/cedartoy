@@ -46,3 +46,41 @@ def test_reactivity_prompt_substitutes_every_cookbook_idiom(client):
                  "energy_brightness_lift", "bar_anchored_strobe",
                  "melodic_glow_tint", "hat_grain"]:
         assert name in p, f"prompt missing cookbook entry {name}"
+
+
+def test_fixit_prompt_returns_markdown(client):
+    """POST a broken shader + log; receive a fix-it prompt back."""
+    from cedartoy.server.api.shader_apply import SHADERS_DIR
+    base = SHADERS_DIR / "fixit_test_temp.glsl"
+    base.write_text("void main(){gl_FragColor=vec4(0.0);}", encoding="utf-8")
+    try:
+        resp = client.post(
+            "/api/reactivity/fixit-prompt",
+            json={
+                "base": "fixit_test_temp.glsl",
+                "broken_glsl": "void main(){iKick;}",
+                "gl_log": "ERROR: 0:1: 'iKick' : undeclared identifier",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        prompt = body["prompt"]
+        assert "iKick" in prompt
+        assert "undeclared identifier" in prompt
+        assert "gl_FragColor=vec4(0.0)" in prompt
+        assert "kick_pulse_camera" in prompt
+        assert "fix the compile error" in prompt.lower()
+    finally:
+        base.unlink(missing_ok=True)
+
+
+def test_fixit_prompt_404_when_base_missing(client):
+    resp = client.post(
+        "/api/reactivity/fixit-prompt",
+        json={
+            "base": "nope_xyz.glsl",
+            "broken_glsl": "void main(){}",
+            "gl_log": "anything",
+        },
+    )
+    assert resp.status_code == 404
