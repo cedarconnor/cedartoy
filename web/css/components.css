@@ -468,3 +468,22 @@ cue-scrubber {
     margin: 0;
     flex: 1;
 }
+
+/* Transport strip */
+transport-strip { display: block; }
+.transport-strip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background: #1f1f1f;
+    border-bottom: 1px solid #2a2a2a;
+}
+.transport-strip #ts-play {
+    padding: 2px 14px;
+    font-size: 14px;
+}
+.transport-strip #ts-play:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}

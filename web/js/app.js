@@ -2,14 +2,14 @@ import { api } from './api.js';
 import './components/shader-browser.js?v=2';
 import './components/config-editor.js?v=4';
 import './components/preview-panel.js?v=3';
-import './components/audio-viz.js?v=2';
+import './components/transport-strip.js?v=1';
 import './components/render-panel.js?v=3';
 import './components/directory-browser.js?v=2';
 import './components/shader-editor.js?v=2';
 import './components/stage-rail.js?v=1';
 import './components/project-panel.js?v=2';
 import './components/output-panel.js?v=2';
-import './components/cue-scrubber.js?v=2';
+import './components/cue-scrubber.js?v=3';
 
 // Global app state
 window.cedartoy = {
