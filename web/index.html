@@ -38,8 +38,9 @@
                     <div data-stage="shader" hidden>
                         <stage-helper
                             title="Stage 2 · Shader"
-                            subtitle="Pick a shader from the rail. Make this shader reactive ▸ copies a Claude-ready prompt that retrofits MusiCue uniforms (iBpm, iBeat, iEnergy…) onto it."></stage-helper>
+                            subtitle="Pick a shader from the rail. Make this shader reactive ▸ copies a Claude-ready prompt; paste Claude's reply into the drawer below and hit Apply."></stage-helper>
                         <config-editor></config-editor>
+                        <shader-reactivity-drawer></shader-reactivity-drawer>
                     </div>
                     <div data-stage="output" hidden>
                         <stage-helper
@@ -79,6 +80,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/clike/clike.min.js"></script>
 
     <!-- App Scripts -->
-    <script type="module" src="/js/app.js?v=9"></script>
+    <script type="module" src="/js/app.js?v=10"></script>
 </body>
 </html>
