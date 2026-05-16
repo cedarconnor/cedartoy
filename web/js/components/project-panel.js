@@ -61,10 +61,16 @@ class ProjectPanel extends HTMLElement {
                 <input type="text" id="project-path-input"
                        placeholder="D:\\path\\to\\my_song\\"
                        value="${p ? this._escape(p.folder) : ''}">
-                <button class="btn btn-primary" id="project-load-btn"
-                        ${this.loading ? 'disabled' : ''}>
-                    ${this.loading ? 'Loading…' : 'Load Project'}
-                </button>
+                <div style="display:flex;gap:6px;margin-top:4px;">
+                    <button class="btn btn-secondary" id="project-browse-btn"
+                            ${this.loading ? 'disabled' : ''}>
+                        Browse…
+                    </button>
+                    <button class="btn btn-primary" id="project-load-btn"
+                            ${this.loading ? 'disabled' : ''}>
+                        ${this.loading ? 'Loading…' : 'Load Project'}
+                    </button>
+                </div>
                 ${errBlock}
                 ${banner}
                 ${rows}
@@ -83,32 +89,65 @@ class ProjectPanel extends HTMLElement {
             const input = this.querySelector('#project-path-input');
             const path = input?.value.trim();
             if (!path) return;
-            this.loading = true;
-            this.error = null;
-            this.render();
-            this.attachEventListeners();
+            await this._loadProject(path);
+        });
+
+        this.querySelector('#project-browse-btn')?.addEventListener('click', async () => {
+            const initial_dir = this.querySelector('#project-path-input')?.value.trim() || null;
             try {
-                const resp = await fetch('/api/project/load', {
+                const resp = await fetch('/api/dialog/pick-folder', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ path }),
+                    body: JSON.stringify({ initial_dir }),
                 });
+                if (resp.status === 503) {
+                    this.error = 'Native folder picker unavailable on this server (no display). Type or paste a path instead.';
+                    this.render();
+                    this.attachEventListeners();
+                    return;
+                }
                 if (!resp.ok) {
                     const detail = await resp.json().catch(() => ({}));
                     throw new Error(detail.detail || `HTTP ${resp.status}`);
                 }
-                this.project = await resp.json();
-                this.dispatchEvent(new CustomEvent('project-loaded', {
-                    detail: this.project, bubbles: true,
-                }));
+                const { path } = await resp.json();
+                if (!path) return;  // user cancelled
+                this.querySelector('#project-path-input').value = path;
+                await this._loadProject(path);
             } catch (e) {
-                this.error = `Failed to load project: ${e.message}`;
-            } finally {
-                this.loading = false;
+                this.error = `Folder picker failed: ${e.message}`;
                 this.render();
                 this.attachEventListeners();
             }
         });
+    }
+
+    async _loadProject(path) {
+        this.loading = true;
+        this.error = null;
+        this.render();
+        this.attachEventListeners();
+        try {
+            const resp = await fetch('/api/project/load', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path }),
+            });
+            if (!resp.ok) {
+                const detail = await resp.json().catch(() => ({}));
+                throw new Error(detail.detail || `HTTP ${resp.status}`);
+            }
+            this.project = await resp.json();
+            this.dispatchEvent(new CustomEvent('project-loaded', {
+                detail: this.project, bubbles: true,
+            }));
+        } catch (e) {
+            this.error = `Failed to load project: ${e.message}`;
+        } finally {
+            this.loading = false;
+            this.render();
+            this.attachEventListeners();
+        }
     }
 }
 
