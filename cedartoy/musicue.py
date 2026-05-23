@@ -395,20 +395,36 @@ class MusicalSpectrumSynth:
             out[track_id] = row
         return out
 
-    def synthesize(
-        self, frame: "EvalFrame", settings: Optional[Dict[str, dict]] = None
+    def synthesize_effective(
+        self, band_values: Dict[str, float], section_energy: float,
+        beat_phase: float, global_energy: float,
     ) -> np.ndarray:
+        """Compose the 2x512 texture from already-effective per-track band
+        scalars (settings/smoothing already applied)."""
         tex = np.zeros((2, 512), dtype=np.float32)
-        for row in self.track_band_contributions(frame, settings).values():
-            tex[0] += row
-        tex[0] += 0.1 * float(frame.section_energy)
+        for tid, band in BAND_TRACKS.items():
+            v = band_values.get(tid, 0.0)
+            if v > 0:
+                s, e = _BIN_RANGES[band]
+                tex[0][s:e] += self._envelopes[band] * v
+        tex[0] += 0.1 * float(section_energy)
         np.clip(tex[0], 0.0, 1.0, out=tex[0])
-
-        wave = 0.5 + 0.5 * float(frame.global_energy) * math.sin(
-            2.0 * math.pi * float(frame.beat_phase)
+        wave = 0.5 + 0.5 * float(global_energy) * math.sin(
+            2.0 * math.pi * float(beat_phase)
         )
         tex[1, :] = max(0.0, min(1.0, wave))
         return tex
+
+    def synthesize(
+        self, frame: "EvalFrame", settings: Optional[Dict[str, dict]] = None
+    ) -> np.ndarray:
+        settings = settings or {}
+        band_values = {
+            tid: apply_setting(self._raw_value(frame, tid), settings.get(tid))
+            for tid in BAND_TRACKS
+        }
+        return self.synthesize_effective(
+            band_values, frame.section_energy, frame.beat_phase, frame.global_energy)
 
 
 def bundle_health(bundle: "MusiCueBundle") -> Dict[str, Any]:

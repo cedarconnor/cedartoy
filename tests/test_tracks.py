@@ -247,3 +247,22 @@ def test_apply_settings_series_threshold_before_smooth_then_gain_then_mute():
     assert apply_settings_series(raw, {"threshold": 0.1, "gain": 2.0}) == [0.8, 0.8]
     # mute zeroes the whole series
     assert apply_settings_series(raw, {"mute": True, "gain": 2.0}) == [0.0, 0.0]
+
+
+def test_synthesize_effective_matches_synthesize_for_same_values():
+    from cedartoy.musicue import MusicalSpectrumSynth, EvalFrame, BAND_TRACKS, apply_setting, _BAND_TRACK_SOURCE
+    synth = MusicalSpectrumSynth()
+    frame = EvalFrame(section_energy=0.4, global_energy=0.5, beat_phase=0.25,
+                      drum_pulses={"kick": 0.9, "snare": 0.3},
+                      midi_energy={"vocals": 0.7})
+    settings = {"drums.kick": {"gain": 0.5}}
+    ref = synth.synthesize(frame, settings)
+    band_values = {}
+    for tid in BAND_TRACKS:
+        field, key = _BAND_TRACK_SOURCE[tid]
+        raw = getattr(frame, field).get(key, 0.0)
+        band_values[tid] = apply_setting(raw, settings.get(tid))
+    out = synth.synthesize_effective(band_values, frame.section_energy,
+                                     frame.beat_phase, frame.global_energy)
+    import numpy as np
+    assert np.allclose(out, ref, atol=1e-6)
