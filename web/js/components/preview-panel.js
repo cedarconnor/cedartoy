@@ -1,5 +1,7 @@
 import { api } from '../api.js';
 import { ShaderRenderer } from '../webgl/renderer.js?v=4';
+import { composeRow0, composeRow1, composeUniforms, effectiveSettings }
+    from '../webgl/cue-compose.js';
 
 class PreviewPanel extends HTMLElement {
     constructor() {
@@ -9,6 +11,9 @@ class PreviewPanel extends HTMLElement {
         this.useAudioTimeline = false;
         this._zeroFft = new Float32Array(512);
         this._zeroWaveform = new Float32Array(512);
+        this._timeline = null;       // /api/reactivity/track-timeline payload
+        this._effSettings = {};      // effective per-track settings (mask)
+        this._timelineFps = 24.0;
     }
 
     connectedCallback() {
@@ -34,14 +39,41 @@ class PreviewPanel extends HTMLElement {
             this._setUseAudioTimeline(!!e.detail?.audio_url);
         });
 
+        // Fetch the per-track timeline so the preview can be driven by the
+        // bundle (matching the render) instead of live FFT.
+        document.addEventListener('project-loaded', async (e) => {
+            const audio = e.detail?.audio_path || e.detail?.path;
+            this._timeline = null;
+            if (!audio) return;
+            try {
+                const r = await fetch('/api/reactivity/track-timeline?audio='
+                    + encodeURIComponent(audio));
+                if (r.ok) {
+                    this._timeline = await r.json();
+                    this._timelineFps = this._timeline.fps || 24.0;
+                    this._effSettings = effectiveSettings(
+                        this._readPersistedSettings(), null);
+                }
+            } catch (_) { this._timeline = null; }
+        });
+
+        document.addEventListener('track-settings-change', (e) => {
+            this._effSettings = effectiveSettings(
+                e.detail.trackSettings, e.detail.soloIds);
+            this._persistSettings(e.detail.trackSettings);
+            if (this.renderer) this._composeAndRender(this.renderer.currentTime || 0);
+        });
+
         // Transport-strip drives time only when preview is connected to it.
         document.addEventListener('transport-frame', (e) => {
             if (!this.useAudioTimeline) return;
-            if (this.renderer) {
-                this.renderer.currentTime = e.detail.timeSec || 0;
-                if (e.detail.bundle) {
-                    this.renderer.updateBundleUniforms(e.detail.bundle);
-                }
+            if (!this.renderer) return;
+            const t = e.detail.timeSec || 0;
+            this.renderer.currentTime = t;
+            if (this._timeline) {
+                this._composeAndRender(t);
+            } else {
+                if (e.detail.bundle) this.renderer.updateBundleUniforms(e.detail.bundle);
                 this.renderer.render();
             }
         });
@@ -177,6 +209,32 @@ class PreviewPanel extends HTMLElement {
         this.renderer.updateBundleUniforms({});
         if (!this.renderer.playing) {
             this.renderer.play();
+        }
+    }
+
+    _composeAndRender(t) {
+        const tl = this._timeline;
+        const n = tl.frames;
+        let f = Math.round(t * this._timelineFps);
+        if (f < 0) f = 0;
+        if (f >= n) f = n - 1;
+        const row0 = composeRow0(tl.frame_data, f, this._effSettings);
+        const row1 = composeRow1(tl.frame_data, f);
+        this.renderer.updateAudioData(row0, row1);
+        this.renderer.updateBundleUniforms(composeUniforms(tl.frame_data, f, this._effSettings));
+        this.renderer.render();
+    }
+
+    _readPersistedSettings() {
+        const ce = document.querySelector('config-editor');
+        return (ce && ce.config && ce.config.track_settings) || {};
+    }
+
+    _persistSettings(trackSettings) {
+        const ce = document.querySelector('config-editor');
+        if (ce && ce.config) {
+            ce.config.track_settings = trackSettings;
+            ce.saveToLocalStorage();
         }
     }
 
