@@ -23,3 +23,10 @@ audio_output/
 .DS_Store
 _output/
 debug_log*.txt
+
+# Build/render scratch & logs
+__pycache__/
+*.pyc
+debug.log
+/cedartoytmp_*/
+/web/static/
