@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { ShaderRenderer } from '../webgl/renderer.js?v=4';
-import { composeRow0, composeRow1, composeUniforms, effectiveSettings, applySetting }
+import { composeRow1, composeUniforms, effectiveSettings,
+    applySettingsSeries, composeRow0FromValues }
     from '../webgl/cue-compose.js';
 
 class PreviewPanel extends HTMLElement {
@@ -13,6 +14,7 @@ class PreviewPanel extends HTMLElement {
         this._zeroWaveform = new Float32Array(512);
         this._timeline = null;       // /api/reactivity/track-timeline payload
         this._effSettings = {};      // effective per-track settings (mask)
+        this._effSeries = {};        // per-track effective per-frame series
         this._timelineFps = 24.0;
     }
 
@@ -53,6 +55,7 @@ class PreviewPanel extends HTMLElement {
                     this._timelineFps = this._timeline.fps || 24.0;
                     this._effSettings = effectiveSettings(
                         this._readPersistedSettings(), null);
+                    this._rebuildEffSeries();
                 }
             } catch (_) { this._timeline = null; }
         });
@@ -60,6 +63,7 @@ class PreviewPanel extends HTMLElement {
         document.addEventListener('track-settings-change', (e) => {
             this._effSettings = effectiveSettings(
                 e.detail.trackSettings, e.detail.soloIds);
+            this._rebuildEffSeries();
             this._persistSettings(e.detail.trackSettings);
             if (this.renderer) this._composeAndRender(this.renderer.currentTime || 0);
         });
@@ -212,13 +216,24 @@ class PreviewPanel extends HTMLElement {
         }
     }
 
+    _rebuildEffSeries() {
+        this._effSeries = {};
+        if (!this._timeline) return;
+        const tracks = this._timeline.frame_data.tracks;
+        for (const tid of Object.keys(tracks)) {
+            this._effSeries[tid] = applySettingsSeries(tracks[tid], this._effSettings[tid]);
+        }
+    }
+
     _composeAndRender(t) {
         const tl = this._timeline;
         const n = tl.frames;
         let f = Math.round(t * this._timelineFps);
         if (f < 0) f = 0;
         if (f >= n) f = n - 1;
-        const row0 = composeRow0(tl.frame_data, f, this._effSettings);
+        const bandValues = {};
+        for (const tid of Object.keys(this._effSeries)) bandValues[tid] = this._effSeries[tid][f];
+        const row0 = composeRow0FromValues(bandValues, tl.frame_data.uniforms.sectionEnergy[f]);
         const row1 = composeRow1(tl.frame_data, f);
         this.renderer.updateAudioData(row0, row1);
         this.renderer.updateBundleUniforms(composeUniforms(tl.frame_data, f, this._effSettings));
@@ -231,7 +246,7 @@ class PreviewPanel extends HTMLElement {
         const fd = tl.frame_data;
         const trackValues = {};
         for (const tid of Object.keys(fd.tracks)) {
-            trackValues[tid] = applySetting(fd.tracks[tid][f], this._effSettings[tid]);
+            trackValues[tid] = (this._effSeries[tid] || [])[f] || 0;
         }
         let sectionLabel = '—';
         const blocks = (tl.tracks.sections && tl.tracks.sections.blocks) || [];

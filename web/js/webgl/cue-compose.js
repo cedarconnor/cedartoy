@@ -37,6 +37,41 @@ export function applySetting(value, setting) {
     return Math.max(0.0, value - threshold) * gain;
 }
 
+// Effective per-frame series for one track: threshold -> one-pole smooth ->
+// gain -> mute. Mirrors cedartoy/musicue.py::apply_settings_series.
+export function applySettingsSeries(raw, setting) {
+    const n = raw.length;
+    const out = new Float32Array(n);
+    if (!setting) { for (let i = 0; i < n; i++) out[i] = raw[i]; return out; }
+    if (setting.mute) return out;                 // all zeros
+    const threshold = setting.threshold || 0.0;
+    const gain = setting.gain == null ? 1.0 : setting.gain;
+    const a = setting.smoothing || 0.0;
+    let prev = 0.0;
+    for (let i = 0; i < n; i++) {
+        const x = Math.max(0.0, raw[i] - threshold);
+        const sm = i === 0 ? x : (1 - a) * x + a * prev;
+        prev = sm;
+        out[i] = sm * gain;
+    }
+    return out;
+}
+
+// Compose row 0 from already-effective per-track band scalars for one frame.
+export function composeRow0FromValues(bandValues, sectionEnergy) {
+    const row0 = new Float32Array(512);
+    for (const [tid, band] of Object.entries(BAND_TRACKS)) {
+        const v = bandValues[tid] || 0.0;
+        if (v > 0) {
+            const [s] = BAND_RANGES[band];
+            const env = ENVELOPES[band];
+            for (let i = 0; i < env.length; i++) row0[s + i] += env[i] * v;
+        }
+    }
+    for (let i = 0; i < 512; i++) row0[i] = Math.min(1.0, row0[i] + 0.1 * (sectionEnergy || 0.0));
+    return row0;
+}
+
 // Persisted track_settings + transient solo set -> effective per-track settings.
 // If any track is soloed, every non-soloed track is muted for the live preview.
 export function effectiveSettings(trackSettings, soloIds) {
