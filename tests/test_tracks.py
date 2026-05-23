@@ -219,3 +219,31 @@ def test_frame_data_composes_to_synth_output():
         )
         ref = synth.synthesize(ev_frame, settings)
         assert np.allclose(row0, ref[0], atol=1e-6)
+
+
+def test_apply_settings_series_reduces_to_apply_setting_when_no_smoothing():
+    from cedartoy.musicue import apply_settings_series, apply_setting
+    raw = [0.0, 0.9, 0.3, 0.05, 0.6]
+    setting = {"threshold": 0.1, "gain": 2.0}     # smoothing defaults to 0
+    series = apply_settings_series(raw, setting)
+    assert series == [apply_setting(v, setting) for v in raw]
+
+
+def test_apply_settings_series_one_pole_smoothing():
+    from cedartoy.musicue import apply_settings_series
+    raw = [1.0, 0.0, 0.0, 0.0]
+    s = apply_settings_series(raw, {"smoothing": 0.5})
+    # sm[0]=1; sm[1]=0.5*0+0.5*1=0.5; sm[2]=0.25; sm[3]=0.125
+    assert abs(s[0] - 1.0) < 1e-9
+    assert abs(s[1] - 0.5) < 1e-9
+    assert abs(s[2] - 0.25) < 1e-9
+    assert abs(s[3] - 0.125) < 1e-9
+
+
+def test_apply_settings_series_threshold_before_smooth_then_gain_then_mute():
+    from cedartoy.musicue import apply_settings_series
+    raw = [0.5, 0.5]
+    # threshold 0.1 -> 0.4 each; smoothing 0 -> 0.4; gain 2 -> 0.8
+    assert apply_settings_series(raw, {"threshold": 0.1, "gain": 2.0}) == [0.8, 0.8]
+    # mute zeroes the whole series
+    assert apply_settings_series(raw, {"mute": True, "gain": 2.0}) == [0.0, 0.0]

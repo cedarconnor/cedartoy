@@ -299,6 +299,28 @@ def apply_setting(value: float, setting: Optional[dict]) -> float:
     return v * gain
 
 
+def apply_settings_series(raw: "List[float]", setting: Optional[dict]) -> "List[float]":
+    """Effective per-frame series for one track: threshold -> one-pole smooth
+    -> gain -> mute. Pure function of (raw, setting) so render and preview
+    match. smoothing == 0 reduces exactly to per-element apply_setting."""
+    n = len(raw)
+    if not setting:
+        return [float(v) for v in raw]
+    if setting.get("mute", False):
+        return [0.0] * n
+    threshold = float(setting.get("threshold", 0.0))
+    gain = float(setting.get("gain", 1.0))
+    a = float(setting.get("smoothing", 0.0))
+    out = [0.0] * n
+    prev = 0.0
+    for i in range(n):
+        x = max(0.0, float(raw[i]) - threshold)
+        sm = x if i == 0 else (1.0 - a) * x + a * prev
+        prev = sm
+        out[i] = sm * gain
+    return out
+
+
 def masked_builtin_uniforms(
     frame: Optional["EvalFrame"], settings: Optional[Dict[str, dict]] = None
 ) -> Dict[str, Any]:
