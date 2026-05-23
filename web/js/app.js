@@ -12,6 +12,7 @@ import './components/shader-reactivity-drawer.js?v=1';
 import './components/project-panel.js?v=3';
 import './components/output-panel.js?v=4';
 import './components/cue-scrubber.js?v=3';
+import './components/track-timeline.js?v=1';
 
 // Global app state
 window.cedartoy = {
@@ -79,3 +80,21 @@ document.addEventListener('project-loaded', (e) => {
     if (typeof ce.saveToLocalStorage === 'function') ce.saveToLocalStorage();
     document.dispatchEvent(new CustomEvent('config-change', { detail: ce.config }));
 });
+
+// Validate mode: near-full-screen preview + docked track timeline.
+const validateToggle = document.getElementById('validate-toggle');
+if (validateToggle) {
+    validateToggle.addEventListener('click', () => {
+        const on = document.body.classList.toggle('validate-mode');
+        validateToggle.classList.toggle('btn-primary', on);
+        // Validate mode needs the audio-timeline clock so the preview is driven.
+        if (on) {
+            const checkbox = document.querySelector('#preview-use-timeline');
+            if (checkbox && !checkbox.checked) {
+                checkbox.checked = true;
+                checkbox.dispatchEvent(new Event('change'));
+            }
+        }
+        window.dispatchEvent(new Event('resize'));
+    });
+}

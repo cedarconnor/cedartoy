@@ -149,3 +149,25 @@ h2, h3, h4 {
     font-size: 0.85rem;
     color: var(--text-secondary);
 }
+
+/* Validate mode: full-screen preview + docked track timeline. */
+body.validate-mode .app-main { grid-template-columns: 0 0 1fr; }
+body.validate-mode .shader-browser-panel,
+body.validate-mode .config-editor-panel,
+body.validate-mode .render-panel-wrapper { display: none; }
+body.validate-mode .preview-panel-wrapper { width: 100%; }
+body.validate-mode #preview-canvas { width: 100%; height: auto; max-height: 70vh; }
+
+.track-timeline { width: 100%; overflow-x: auto; }
+.track-timeline .tt-grid { display: grid; grid-template-columns: 130px 1fr; }
+.track-timeline .tt-gutter { display: flex; align-items: center; gap: 4px;
+    height: 22px; font-size: 10px; color: #9ab; }
+.track-timeline .tt-gutter.dim { opacity: 0.45; }
+.track-timeline .tt-name { flex: 1; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+.track-timeline .tt-btn { width: 16px; height: 16px; line-height: 14px;
+    padding: 0; font-size: 10px; background: #2a2a3a; color: #aaa;
+    border: 1px solid #444; border-radius: 3px; cursor: pointer; }
+.track-timeline .tt-btn.on { background: #e94560; color: #fff; }
+.track-timeline .tt-svg { width: 100%; height: auto; }
+.track-timeline .tt-empty { padding: 8px; color: #888; font-size: 12px; }
