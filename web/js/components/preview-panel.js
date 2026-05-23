@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { ShaderRenderer } from '../webgl/renderer.js?v=4';
-import { composeRow0, composeRow1, composeUniforms, effectiveSettings }
+import { composeRow0, composeRow1, composeUniforms, effectiveSettings, applySetting }
     from '../webgl/cue-compose.js';
 
 class PreviewPanel extends HTMLElement {
@@ -223,6 +223,26 @@ class PreviewPanel extends HTMLElement {
         this.renderer.updateAudioData(row0, row1);
         this.renderer.updateBundleUniforms(composeUniforms(tl.frame_data, f, this._effSettings));
         this.renderer.render();
+        this._emitCueFrame(f, t);
+    }
+
+    _emitCueFrame(f, t) {
+        const tl = this._timeline;
+        const fd = tl.frame_data;
+        const trackValues = {};
+        for (const tid of Object.keys(fd.tracks)) {
+            trackValues[tid] = applySetting(fd.tracks[tid][f], this._effSettings[tid]);
+        }
+        let sectionLabel = '—';
+        const blocks = (tl.tracks.sections && tl.tracks.sections.blocks) || [];
+        for (const b of blocks) {
+            if (b.start <= t && t < b.end) { sectionLabel = b.label || '—'; break; }
+        }
+        document.dispatchEvent(new CustomEvent('cue-frame', { detail: {
+            frame: f, timeSec: t, sectionLabel, bundleMode: 'cued',
+            uniforms: composeUniforms(fd, f, this._effSettings),
+            trackValues,
+        }}));
     }
 
     _readPersistedSettings() {
