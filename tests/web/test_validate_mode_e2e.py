@@ -29,23 +29,31 @@ def test_mute_kick_drops_low_band():
             timeout=10000)
         page.click("#validate-toggle")
 
-        # Compose low-band energy at frame 0 directly via the module.
-        low_before = page.evaluate("""async () => {
+        # Sample a frame where kick is actually active (frame 0 is usually a
+        # rest, where the low band is only the section-energy floor). Compose
+        # the low band there with kick on vs muted, via the module directly.
+        result = page.evaluate("""async () => {
             const m = await import('/js/webgl/cue-compose.js');
             const tl = document.querySelector('preview-panel')._timeline;
-            const eff = m.effectiveSettings({}, null);
-            const row = m.composeRow0(tl.frame_data, 0, eff);
-            let s = 0; for (let i = 0; i < 32; i++) s += row[i]; return s;
-        }""")
-
-        low_after = page.evaluate("""async () => {
-            const m = await import('/js/webgl/cue-compose.js');
-            const tl = document.querySelector('preview-panel')._timeline;
-            const eff = m.effectiveSettings({'drums.kick': {mute: true}}, null);
-            const row = m.composeRow0(tl.frame_data, 0, eff);
-            let s = 0; for (let i = 0; i < 32; i++) s += row[i]; return s;
+            // Pick the strongest kick frame — drum strengths vary per bundle.
+            const kick = tl.frame_data.tracks['drums.kick'];
+            let f = -1, best = 0;
+            for (let i = 0; i < kick.length; i++) {
+                if (kick[i] > best) { best = kick[i]; f = i; }
+            }
+            if (f < 0 || best <= 0) return { f: -1, before: 0, after: 0 };
+            const lowSum = (eff) => {
+                const row = m.composeRow0(tl.frame_data, f, eff);
+                let s = 0; for (let i = 0; i < 32; i++) s += row[i]; return s;
+            };
+            return {
+                f,
+                before: lowSum(m.effectiveSettings({}, null)),
+                after: lowSum(m.effectiveSettings({'drums.kick': {mute: true}}, null)),
+            };
         }""")
 
         browser.close()
-        assert low_before > 0.0
-        assert low_after < low_before
+        assert result["f"] >= 0, "no kick-active frame found in timeline"
+        assert result["before"] > 0.0
+        assert result["after"] < result["before"]
