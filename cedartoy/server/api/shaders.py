@@ -158,7 +158,9 @@ async def get_shader(shader_path: str):
     except ValueError:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    with open(full_path, 'r') as f:
+    # UTF-8 explicit: Windows default is cp1252 which chokes on non-ASCII
+    # characters (em-dash, arrows) that may appear in reactivity comments.
+    with open(full_path, 'r', encoding='utf-8') as f:
         source = f.read()
 
     metadata = _parse_shader_metadata(full_path)
@@ -186,7 +188,7 @@ async def save_shader(data: dict):
     except ValueError:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    with open(full_path, 'w') as f:
+    with open(full_path, 'w', encoding='utf-8') as f:
         f.write(source)
 
     return {"status": "success"}
@@ -196,7 +198,7 @@ def _parse_shader_metadata(shader_path: Path) -> Dict:
     metadata = {}
 
     try:
-        with open(shader_path, 'r') as f:
+        with open(shader_path, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if not line:

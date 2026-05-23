@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 
 BUNDLE_UNIFORMS = (
-    "iBpm", "iBeat", "iBar", "iSectionEnergy", "iEnergy", "iChannel0",
+    "iBpm", "iBeat", "iBar", "iSectionEnergy", "iSectionId", "iEnergy", "iChannel0",
 )
 
 _LINE_COMMENT_RE = re.compile(r"//[^\n]*")
