@@ -308,7 +308,11 @@ def _hann_envelope(width: int) -> np.ndarray:
 
 
 class MusicalSpectrumSynth:
-    """Synthesize a 2x512 iChannel0 texture from an EvalFrame."""
+    """Synthesize a 2x512 iChannel0 texture from an EvalFrame.
+
+    Composes row 0 from per-track band contributions so the same select-and-sum
+    model can run client-side (Phase 2) and match this output exactly.
+    """
 
     def __init__(self) -> None:
         self._envelopes = {
@@ -316,28 +320,34 @@ class MusicalSpectrumSynth:
             for name, (start, end) in _BIN_RANGES.items()
         }
 
-    def _add_range(self, row: np.ndarray, name: str, weight: float) -> None:
-        if weight <= 0:
-            return
-        s, e = _BIN_RANGES[name]
-        row[s:e] += self._envelopes[name] * weight
+    def _raw_value(self, frame: "EvalFrame", track_id: str) -> float:
+        src_field, key = _BAND_TRACK_SOURCE[track_id]
+        return float(getattr(frame, src_field).get(key, 0.0))
 
-    def synthesize(self, frame: EvalFrame) -> np.ndarray:
+    def track_band_contributions(
+        self, frame: "EvalFrame", settings: Optional[Dict[str, dict]] = None
+    ) -> Dict[str, np.ndarray]:
+        """Each band track's isolated 512-bin row (settings applied)."""
+        settings = settings or {}
+        out: Dict[str, np.ndarray] = {}
+        for track_id, band in BAND_TRACKS.items():
+            value = apply_setting(self._raw_value(frame, track_id),
+                                  settings.get(track_id))
+            s, e = _BIN_RANGES[band]
+            row = np.zeros(512, dtype=np.float32)
+            if value > 0:
+                row[s:e] = self._envelopes[band] * value
+            out[track_id] = row
+        return out
+
+    def synthesize(
+        self, frame: "EvalFrame", settings: Optional[Dict[str, dict]] = None
+    ) -> np.ndarray:
         tex = np.zeros((2, 512), dtype=np.float32)
-        row0 = tex[0]
-
-        low = frame.drum_pulses.get("kick", 0.0)
-        low_mid = frame.drum_pulses.get("snare", 0.0) + frame.drum_pulses.get("tom", 0.0)
-        mid_hi = frame.drum_pulses.get("hat", 0.0) + frame.drum_pulses.get("cymbal", 0.0)
-        high = frame.midi_energy.get("vocals", 0.0) + frame.midi_energy.get("other", 0.0)
-
-        self._add_range(row0, "low", low)
-        self._add_range(row0, "low_mid", low_mid)
-        self._add_range(row0, "mid_hi", mid_hi)
-        self._add_range(row0, "high", high)
-
-        row0 += 0.1 * float(frame.section_energy)
-        np.clip(row0, 0.0, 1.0, out=row0)
+        for row in self.track_band_contributions(frame, settings).values():
+            tex[0] += row
+        tex[0] += 0.1 * float(frame.section_energy)
+        np.clip(tex[0], 0.0, 1.0, out=tex[0])
 
         wave = 0.5 + 0.5 * float(frame.global_energy) * math.sin(
             2.0 * math.pi * float(frame.beat_phase)
