@@ -8,8 +8,29 @@ CameraMode = Literal["2d", "equirect", "ll180"]
 StereoMode = Literal["none", "sbs", "tb"]
 AudioMode = Literal["shadertoy", "history", "both"]
 BundleMode = Literal["auto", "raw", "cued", "blend"]
-OutputFormat = Literal["png", "exr"]
+OutputFormat = Literal["png", "tif", "tif_lzw", "exr"]
 BitDepth = Literal["8", "16f", "32f"]
+
+
+class TrackSetting(BaseModel):
+    gain: float = 1.0
+    mute: bool = False
+    threshold: float = 0.0
+    smoothing: float = 0.0  # NOTE: filtering implemented in Phase 4 (calibration)
+
+    @field_validator("gain")
+    @classmethod
+    def _gain_non_negative(cls, value: float) -> float:
+        if value < 0:
+            raise ValueError("gain must be >= 0")
+        return value
+
+    @field_validator("threshold", "smoothing")
+    @classmethod
+    def _unit_range(cls, value: float, info) -> float:
+        if value < 0 or value > 1:
+            raise ValueError(f"{info.field_name} must be between 0 and 1")
+        return value
 
 
 class CedarToyConfig(BaseModel):
@@ -29,6 +50,10 @@ class CedarToyConfig(BaseModel):
     shutter: float = 0.5
     default_output_format: OutputFormat = "png"
     default_bit_depth: BitDepth = "8"
+    # PNG deflate level. 1 = fastest (huge speedup over PIL's default 6 at
+    # 4K+ resolutions, ~30% larger files). 9 = smallest, slowest. Only used
+    # when default_output_format is "png".
+    png_compress_level: int = 1
     audio_path: Optional[Path] = None
     audio_mode: AudioMode = "both"
     bundle_path: Optional[Path] = None
@@ -43,6 +68,7 @@ class CedarToyConfig(BaseModel):
     output_pattern: str = "frame_{frame:05d}.{ext}"
     disk_streaming: Optional[bool] = None
     shader_parameters: Dict[str, Any] = Field(default_factory=dict)
+    track_settings: Dict[str, TrackSetting] = Field(default_factory=dict)
     channels: Optional[Dict[int, str]] = None
     iChannel_paths: Optional[Dict[int, str]] = None
     multipass: Optional[Dict[str, Any]] = None

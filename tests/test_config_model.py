@@ -85,3 +85,34 @@ def test_preserves_nested_multipass_config():
 
     assert cfg.multipass["buffers"]["A"]["channels"] == {0: "A"}
     assert cfg.multipass["buffers"]["Image"]["outputs_to_screen"] is True
+
+
+def test_track_settings_defaults_and_roundtrip():
+    from cedartoy.config_model import normalize_config, TrackSetting
+
+    cfg = normalize_config({
+        "shader": "shaders/foo.glsl",
+        "track_settings": {
+            "drums.kick": {"mute": True},
+            "stem.vocals": {"gain": 2.0, "threshold": 0.1},
+        },
+    })
+    assert cfg.track_settings["drums.kick"].mute is True
+    assert cfg.track_settings["drums.kick"].gain == 1.0          # default
+    assert cfg.track_settings["drums.kick"].smoothing == 0.0     # default
+    assert cfg.track_settings["stem.vocals"].gain == 2.0
+    assert cfg.track_settings["stem.vocals"].threshold == 0.1
+
+    # round-trips to plain dicts for the runtime cfg
+    runtime = cfg.to_runtime_dict()
+    assert runtime["track_settings"]["drums.kick"]["mute"] is True
+    assert runtime["track_settings"]["stem.vocals"]["gain"] == 2.0
+
+
+def test_track_setting_rejects_negative_gain():
+    import pytest
+    from pydantic import ValidationError
+    from cedartoy.config_model import normalize_config
+    with pytest.raises(ValidationError):
+        normalize_config({"shader": "shaders/foo.glsl",
+                          "track_settings": {"drums.kick": {"gain": -1.0}}})
