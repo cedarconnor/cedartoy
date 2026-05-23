@@ -299,6 +299,39 @@ def apply_setting(value: float, setting: Optional[dict]) -> float:
     return v * gain
 
 
+def masked_builtin_uniforms(
+    frame: Optional["EvalFrame"], settings: Optional[Dict[str, dict]] = None
+) -> Dict[str, Any]:
+    """The six Phase-1 scalar uniforms with per-track mute applied.
+
+    Uniform tracks: 'tempo' -> iBpm/iBeat/iBar, 'sections' -> iSectionEnergy/
+    iSectionId, 'energy' -> iEnergy. Mute zeroes a track's uniforms; gain/
+    threshold scale the energy-like uniforms (iSectionEnergy, iEnergy).
+    Structural ints (iBpm/iBeat/iBar/iSectionId) honor mute only.
+    """
+    if frame is None:
+        return {"iBpm": 0.0, "iBeat": 0.0, "iBar": 0,
+                "iSectionEnergy": 0.0, "iSectionId": 0, "iEnergy": 0.0}
+    settings = settings or {}
+
+    def muted(track_id: str) -> bool:
+        s = settings.get(track_id)
+        return bool(s and s.get("mute", False))
+
+    tempo_off = muted("tempo")
+    sections_off = muted("sections")
+
+    return {
+        "iBpm": 0.0 if tempo_off else float(frame.bpm),
+        "iBeat": 0.0 if tempo_off else float(frame.beat_phase),
+        "iBar": 0 if tempo_off else int(frame.bar),
+        "iSectionEnergy": 0.0 if sections_off
+            else apply_setting(float(frame.section_energy), settings.get("sections")),
+        "iSectionId": 0 if sections_off else int(frame.section_id),
+        "iEnergy": apply_setting(float(frame.global_energy), settings.get("energy")),
+    }
+
+
 def _hann_envelope(width: int) -> np.ndarray:
     if width <= 0:
         return np.zeros(0, dtype=np.float32)

@@ -77,3 +77,32 @@ def test_gain_boosts_band():
     boosted = synth.synthesize(frame, settings={"stem.vocals": {"gain": 1.5}})
     # high band (bins 256:512) grows with vocal gain (pre-clip headroom assumed)
     assert boosted[0, 300] >= base[0, 300]
+
+
+from cedartoy.musicue import masked_builtin_uniforms
+
+
+def test_masked_uniforms_passthrough_and_mute():
+    frame = EvalFrame(bpm=128.0, beat_phase=0.5, bar=3,
+                      section_energy=0.4, section_id=2, global_energy=0.5)
+
+    u = masked_builtin_uniforms(frame, settings=None)
+    assert u == {"iBpm": 128.0, "iBeat": 0.5, "iBar": 3,
+                 "iSectionEnergy": 0.4, "iSectionId": 2, "iEnergy": 0.5}
+
+    # muting tempo zeroes bpm/beat/bar (closes the step(1.0,iBpm) gate)
+    u = masked_builtin_uniforms(frame, settings={"tempo": {"mute": True}})
+    assert u["iBpm"] == 0.0 and u["iBeat"] == 0.0 and u["iBar"] == 0
+    assert u["iEnergy"] == 0.5   # other tracks unaffected
+
+    # muting energy zeroes iEnergy; muting sections zeroes section uniforms
+    u = masked_builtin_uniforms(frame, settings={"energy": {"mute": True},
+                                                 "sections": {"mute": True}})
+    assert u["iEnergy"] == 0.0
+    assert u["iSectionEnergy"] == 0.0 and u["iSectionId"] == 0
+
+
+def test_masked_uniforms_none_frame():
+    u = masked_builtin_uniforms(None, settings={"tempo": {"mute": True}})
+    assert u == {"iBpm": 0.0, "iBeat": 0.0, "iBar": 0,
+                 "iSectionEnergy": 0.0, "iSectionId": 0, "iEnergy": 0.0}
