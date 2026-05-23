@@ -1,6 +1,8 @@
 # CedarToy
 
-> **Status:** v0.5 — Unified preview-sync (audio + shader + cue scrubber in one playhead), paste-back Claude round-trip with compile-error fix-it loop, native folder picker, 2×2 output grid, per-stage helper bars, bundle schema 1.1 (no more false-positive sha warning).
+> **Status:** v0.6 — **Validate mode**: a near-full-screen preview with a per-track timeline, per-track **mute / solo**, **calibration** (gain / threshold / smoothing), a playhead **cue inspector**, **section loop**, and a four-panel **A/B grid** (raw / cued / blend / no-audio). The preview is now driven by the same bundle signal the render uses (**preview ⇄ render parity**), mutes/calibration persist into the final render, the Make-Reactive prompt now embeds the loaded song's available bundle data, and shader source is served/fetched `no-store` so "Apply over original" always recompiles fresh.
+>
+> **v0.5** — Unified preview-sync (audio + shader + cue scrubber in one playhead), paste-back Claude round-trip with compile-error fix-it loop, native folder picker, 2×2 output grid, per-stage helper bars, bundle schema 1.1 (no more false-positive sha warning).
 
 **CedarToy** is a headless, high-quality GLSL shader renderer for generative art, video production, and VR/dome content. It is compatible with Shadertoy shader syntax and extends it with high-resolution tiling, temporal supersampling, spherical camera mappings, and music-aware reactivity driven by [MusiCue](https://github.com/cedarconnor/MusiCue) bundles.
 
@@ -110,6 +112,30 @@ The log line in the footer confirms which bundle was loaded.
 
 ---
 
+## Validate mode — see and verify what the music drives
+
+A **Validate** toggle in the header flips CedarToy into a near-full-screen preview built for one question: *which musical track is driving which visual change?* It is the fastest way to confirm a shader reacts the way you intended **before** committing to a long render.
+
+**Preview ⇄ render parity.** In Validate mode the preview is driven by the **same bundle-synthesized signal the headless render uses** — not the browser's live FFT — so what you see is what the final render produces. (Outside Validate mode the preview still uses live FFT for a quick look.) Under the hood, Python is the single canonical evaluator: it ships a per-track timeline the browser only *sums*, so the two paths can't drift (pinned by a parity test).
+
+**Per-track mute / solo.** A multi-lane track graph docks under the preview — one lane per source track:
+
+- drums — `kick`, `snare`, `hat`, `tom`, `cymbal`, `other`
+- melodic stems — `vocals`, `other`, `bass`
+- `tempo`, `sections`, `energy`
+
+Each lane has **M**(ute) and **S**(olo) buttons and draws its data in its native shape (drum onsets as strength-sized ticks, stems/energy as sparklines, sections as labeled blocks, beats as ticks; empty tracks are flagged "no data"). Mute a track to confirm its contribution; solo one to isolate it. **Mutes persist into the final render** (saved as `track_settings`); solo is preview-only.
+
+**Calibration.** Each lane also exposes **gain / threshold / smoothing** sliders. Gain boosts a weak track so you can see it, threshold gates noise, and smoothing applies a causal one-pole low-pass to soften a track's response. The math runs identically in the preview and the render, so a dialed-in calibration ships with the render.
+
+**Cue inspector.** A live readout at the playhead shows the current section, bar/beat, the six bundle uniforms actually being sent, and each track's effective (post-mute/calibration) value — so "is it driving?" is never a guess.
+
+**Section loop.** **🔁 Loop section** repeats the section under the playhead, so you can dial in a chorus or drop without scrubbing.
+
+**A/B comparison grid.** The **A/B** toggle splits the preview into four synchronized panels — **raw FFT**, **cued** (bundle), **blend**, and **no-audio** — same shader, same playhead — so you can see at a glance whether the MusiCue data is helping or hiding the music.
+
+---
+
 ## MusiCue integration
 
 CedarToy can drive a shader from raw FFT amplitude alone, but if you also use [**MusiCue**](https://github.com/cedarconnor/MusiCue), you get structured musical events — beats, drum hits, section transitions, MIDI activity — packaged next to your audio.
@@ -144,15 +170,18 @@ musicue export-bundle my_music.mp3
 
 ### Bundle-aware shader uniforms
 
-CedarToy binds five uniforms whenever a bundle is loaded. Declaring any of them in your GLSL opts the shader into bundle-aware reactivity:
+CedarToy binds six uniforms whenever a bundle is loaded. Declaring any of them in your GLSL opts the shader into bundle-aware reactivity:
 
 ```glsl
 uniform float iBpm;            // current BPM
 uniform float iBeat;           // [0,1] phase within the current beat
 uniform int   iBar;            // 0-indexed bar number
 uniform float iSectionEnergy;  // [0,1] energy rank of current section
+uniform int   iSectionId;      // stable per-label section id (verse=0, chorus=1, …)
 uniform float iEnergy;         // [0,1] global energy at this moment
 ```
+
+These six uniforms — plus the bundle-synthesized `iChannel0` texture — are exactly what Validate mode lets you mute, solo, and calibrate per track.
 
 Shaders that don't declare these still work — they see the bundle-driven `iChannel0` texture and behave more musically without any code change.
 
@@ -186,6 +215,8 @@ The fast path:
 4. If it doesn't compile, hit **📋 Copy fix-it prompt ▸** in the drawer's error state. The fix-it prompt bundles the original shader, the broken attempt, the GL error, and the cookbook. Paste it into Claude, take the fix, paste back into the drawer, Apply. Repeat until clean.
 
 Each cookbook entry documents which inputs it reads, what it modulates, a default amplitude, and a recommended cap so the original visual identity stays recognizable even when the song is silent.
+
+When a project is loaded, the **Make this shader reactive ▸** prompt also embeds a summary of *that song's* available bundle data — which drums, stems, and sections are actually populated — so Claude maps reactivity only to tracks that exist rather than guessing. And because shader source is now served and fetched `no-store`, **Apply over original** always recompiles the freshly written file (no stale-cache surprises).
 
 ---
 
