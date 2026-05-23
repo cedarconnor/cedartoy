@@ -184,3 +184,38 @@ def test_timeline_frame_scalars_match_evaluator():
                - f10.drum_pulses.get("kick", 0.0)) < 1e-6
     assert abs(tl["frame_data"]["uniforms"]["energy"][10]
                - f10.global_energy) < 1e-6
+
+
+def test_frame_data_composes_to_synth_output():
+    from cedartoy.musicue import (
+        MusicalSpectrumSynth, EvalFrame, BAND_TRACKS, _BIN_RANGES,
+        _hann_envelope, apply_setting,
+    )
+    b = _bundle()
+    tl = build_track_timeline(b, fps=24.0)
+    fr = tl["frame_data"]
+    synth = MusicalSpectrumSynth()
+    settings = {"drums.kick": {"gain": 0.5}, "stem.vocals": {"mute": True}}
+    envelopes = {n: _hann_envelope(e - s) for n, (s, e) in _BIN_RANGES.items()}
+
+    for f in (0, 5, 10, 40):
+        # Compose row0 the way the browser will: sum band-filled scalars.
+        row0 = np.zeros(512, dtype=np.float32)
+        for tid, band in BAND_TRACKS.items():
+            v = apply_setting(fr["tracks"][tid][f], settings.get(tid))
+            s, e = _BIN_RANGES[band]
+            if v > 0:
+                row0[s:e] += envelopes[band] * v
+        row0 += 0.1 * fr["uniforms"]["sectionEnergy"][f]
+        np.clip(row0, 0.0, 1.0, out=row0)
+
+        # Reference: the canonical synth for the same frame + settings.
+        ev_frame = EvalFrame(
+            section_energy=fr["uniforms"]["sectionEnergy"][f],
+            drum_pulses={k.split(".")[1]: fr["tracks"][k][f]
+                         for k in BAND_TRACKS if k.startswith("drums.")},
+            midi_energy={k.split(".")[1]: fr["tracks"][k][f]
+                         for k in BAND_TRACKS if k.startswith("stem.")},
+        )
+        ref = synth.synthesize(ev_frame, settings)
+        assert np.allclose(row0, ref[0], atol=1e-6)
