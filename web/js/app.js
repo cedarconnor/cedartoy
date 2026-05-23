@@ -13,6 +13,7 @@ import './components/project-panel.js?v=3';
 import './components/output-panel.js?v=4';
 import './components/cue-scrubber.js?v=3';
 import './components/track-timeline.js?v=1';
+import './components/cue-inspector.js?v=1';
 
 // Global app state
 window.cedartoy = {
