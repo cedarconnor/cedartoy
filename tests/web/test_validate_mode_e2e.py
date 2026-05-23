@@ -2,7 +2,7 @@ import socket
 import pytest
 
 URL = "http://127.0.0.1:8080"
-PROJECT = None  # set to a folder containing audio + sibling .musicue.json with drums
+PROJECT = r"D:\MusiCue\exports\hair dye"  # audio + sibling .musicue.json with drums
 
 
 def _server_up():
