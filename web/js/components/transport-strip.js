@@ -16,6 +16,7 @@ class TransportStrip extends HTMLElement {
         this._attachListeners();
         document.addEventListener('project-loaded', (e) => this._onProjectLoaded(e.detail));
         document.addEventListener('transport-seek', (e) => this._seek(e.detail.t));
+        document.addEventListener('transport-sync-request', () => this._emitCurrentFrame());
         document.addEventListener('keydown', (e) => this._onKey(e));
     }
 
@@ -104,7 +105,7 @@ class TransportStrip extends HTMLElement {
                 if (r.ok) this.bundle = await r.json();
             } catch {}
         }
-        this._renderReadout();
+        this._emitCurrentFrame();
     }
 
     async _togglePlay() {
@@ -150,9 +151,13 @@ class TransportStrip extends HTMLElement {
     }
 
     _tick() {
+        this._emitAudioData();
+        this._emitCurrentFrame();
+    }
+
+    _emitCurrentFrame() {
         const t = this.audio ? this.audio.currentTime : 0;
         this._updateTime(t);
-        this._emitAudioData();
         const bundle = this._computeBundleUniforms(t);
         this._renderReadoutFrom(bundle);
         document.dispatchEvent(new CustomEvent('transport-frame', {
@@ -161,10 +166,11 @@ class TransportStrip extends HTMLElement {
     }
 
     _computeBundleUniforms(t) {
-        // Returns {bpm, beat, bar, energy, sectionEnergy, sectionLabel} for
-        // the current playhead time. All zeros when no bundle is loaded.
+        // Returns {bpm, beat, bar, energy, sectionEnergy, sectionId, sectionLabel}
+        // for the current playhead time. All zeros when no bundle is loaded.
         if (!this.bundle) {
-            return { bpm: 0, beat: 0, bar: 0, energy: 0, sectionEnergy: 0, sectionLabel: '—' };
+            return { bpm: 0, beat: 0, bar: 0, energy: 0,
+                     sectionEnergy: 0, sectionId: 0, sectionLabel: '—' };
         }
         const b = this.bundle;
         const bpm = (b.tempo && b.tempo.bpm_global) || 0;
@@ -184,15 +190,29 @@ class TransportStrip extends HTMLElement {
             const idx = Math.min(Math.floor(t / ge.hop_sec), ge.values.length - 1);
             if (idx >= 0) energy = ge.values[idx] ?? 0;
         }
-        let sectionEnergy = 0, sectionLabel = '—';
+        // Lazily build label → stable id map per bundle. Mirrors
+        // BundleEvaluator._section_label_ids on the headless side so the
+        // same shader sees the same ids in preview and final render.
+        if (!b._sectionLabelIds) {
+            const map = {};
+            let next = 0;
+            for (const s of (b.sections || [])) {
+                const label = s.label || '';
+                if (!(label in map)) map[label] = next++;
+            }
+            b._sectionLabelIds = map;
+        }
+        let sectionEnergy = 0, sectionId = 0, sectionLabel = '—';
         for (const s of (b.sections || [])) {
             if (s.start <= t && t < s.end) {
                 sectionEnergy = s.energy_rank ?? 0;
                 sectionLabel = s.label || '—';
+                sectionId = b._sectionLabelIds[s.label || ''] ?? 0;
                 break;
             }
         }
-        return { bpm, beat: beatPhase, bar, energy, sectionEnergy, sectionLabel };
+        return { bpm, beat: beatPhase, bar, energy,
+                 sectionEnergy, sectionId, sectionLabel };
     }
 
     _emitAudioData() {
