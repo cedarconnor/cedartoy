@@ -12,7 +12,8 @@ export const api = {
     },
 
     async getShader(path) {
-        const res = await fetch(`${API_BASE}/shaders/${encodeURIComponent(path)}`);
+        const res = await fetch(`${API_BASE}/shaders/${encodeURIComponent(path)}`,
+            { cache: 'no-store' });
         return await res.json();
     },
 

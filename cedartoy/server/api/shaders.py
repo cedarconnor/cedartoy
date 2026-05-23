@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, JSONResponse
 from pathlib import Path
 from typing import List, Dict
 import re
@@ -165,11 +165,12 @@ async def get_shader(shader_path: str):
 
     metadata = _parse_shader_metadata(full_path)
 
-    return {
-        "path": shader_path,
-        "source": source,
-        "metadata": metadata
-    }
+    # no-store: an "apply over original" overwrites the same path, so the
+    # browser must never serve a cached copy of the old source.
+    return JSONResponse(
+        content={"path": shader_path, "source": source, "metadata": metadata},
+        headers={"Cache-Control": "no-store"},
+    )
 
 @router.post("/save")
 async def save_shader(data: dict):
