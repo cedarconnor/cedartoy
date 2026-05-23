@@ -12,6 +12,7 @@ from cedartoy.reactivity import (
     build_reactivity_prompt,
     parse_declared_uniforms,
 )
+from cedartoy.musicue import build_track_timeline, load_for_audio
 
 router = APIRouter()
 
@@ -30,7 +31,13 @@ def reactivity_prompt(shader: str) -> dict:
         if rel.startswith(prefix):
             rel = rel[len(prefix):]
             break
-    src_path = _SHADERS_DIR / rel
+    src_path = (_SHADERS_DIR / rel).resolve()
+    # Same containment check as fixit_prompt: reject .. traversal and any
+    # absolute path that escapes the shaders directory.
+    try:
+        src_path.relative_to(_SHADERS_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="shader outside shaders directory")
     if not src_path.exists() or not src_path.is_file():
         raise HTTPException(status_code=404, detail=f"shader not found: {shader}")
 
@@ -77,3 +84,16 @@ def fixit_prompt(body: FixitRequest) -> dict:
         cookbook=_COOKBOOK_PATH.read_text(encoding="utf-8"),
     )
     return {"prompt": prompt}
+
+
+@router.get("/track-timeline")
+def track_timeline(audio: str, fps: float = 24.0) -> dict:
+    """Per-track timeline (lane-draw data + health) for the given audio file."""
+    audio_path = Path(audio)
+    if not audio_path.exists():
+        raise HTTPException(status_code=404, detail=f"audio not found: {audio}")
+    result = load_for_audio(audio_path)
+    if result.bundle is None:
+        raise HTTPException(status_code=404,
+                            detail=f"no MusiCue bundle for {audio}")
+    return build_track_timeline(result.bundle, fps=fps)
