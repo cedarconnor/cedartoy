@@ -152,6 +152,7 @@ class EvalFrame:
     beat_phase: float = 0.0
     bar: int = 0
     section_energy: float = 0.0
+    section_id: int = 0
     global_energy: float = 0.0
     drum_pulses: Dict[str, float] = field(default_factory=dict)
     midi_energy: Dict[str, float] = field(default_factory=dict)
@@ -168,6 +169,13 @@ class BundleEvaluator:
         self._beat_times = [b.t for b in bundle.beats]
         self._downbeats = [(b.t, b.bar) for b in bundle.beats if b.is_downbeat]
         self._sections = sorted(bundle.sections, key=lambda s: s.start)
+        # Label → stable id, in first-seen order. Lets shaders distinguish
+        # verse from chorus by index (each label maps to a unique int).
+        self._section_label_ids: Dict[str, int] = {}
+        for sec in self._sections:
+            label = sec.label or ""
+            if label not in self._section_label_ids:
+                self._section_label_ids[label] = len(self._section_label_ids)
         self._beats_per_bar = (
             bundle.tempo.time_signature[0]
             if bundle.tempo.time_signature else 4
@@ -207,6 +215,12 @@ class BundleEvaluator:
                 return sec.energy_rank
         return 0.0
 
+    def _section_id_at(self, t: float) -> int:
+        for sec in self._sections:
+            if sec.start <= t < sec.end:
+                return self._section_label_ids.get(sec.label or "", 0)
+        return 0
+
     def _drum_pulses_at(self, t: float) -> Dict[str, float]:
         out: Dict[str, float] = {}
         for cls, events in self._drums.items():
@@ -228,6 +242,7 @@ class BundleEvaluator:
             beat_phase=self._beat_phase_at(t),
             bar=self._bar_at(t),
             section_energy=self._section_energy_at(t),
+            section_id=self._section_id_at(t),
             global_energy=_sample_curve(self.bundle.global_energy, t),
             drum_pulses=self._drum_pulses_at(t),
             midi_energy=self._curve_dict_at(self.bundle.midi_energy, t),
@@ -241,6 +256,47 @@ _BIN_RANGES = {
     "mid_hi":  (96, 256),
     "high":    (256, 512),
 }
+
+# Canonical track inventory. Band tracks contribute to an iChannel0 band;
+# uniform tracks drive scalar uniforms (handled in masked_builtin_uniforms).
+BAND_TRACKS: Dict[str, str] = {
+    "drums.kick":   "low",
+    "drums.snare":  "low_mid",
+    "drums.tom":    "low_mid",
+    "drums.hat":    "mid_hi",
+    "drums.cymbal": "mid_hi",
+    "drums.other":  "mid_hi",
+    "stem.vocals":  "high",
+    "stem.other":   "high",
+    "stem.bass":    "high",
+}
+UNIFORM_TRACKS = {"tempo", "sections", "energy"}
+ALL_TRACK_IDS = list(BAND_TRACKS.keys()) + sorted(UNIFORM_TRACKS)
+
+# Map a band track id to the EvalFrame field + key holding its raw value.
+_BAND_TRACK_SOURCE = {
+    "drums.kick":   ("drum_pulses", "kick"),
+    "drums.snare":  ("drum_pulses", "snare"),
+    "drums.tom":    ("drum_pulses", "tom"),
+    "drums.hat":    ("drum_pulses", "hat"),
+    "drums.cymbal": ("drum_pulses", "cymbal"),
+    "drums.other":  ("drum_pulses", "other"),
+    "stem.vocals":  ("midi_energy", "vocals"),
+    "stem.other":   ("midi_energy", "other"),
+    "stem.bass":    ("midi_energy", "bass"),
+}
+
+
+def apply_setting(value: float, setting: Optional[dict]) -> float:
+    """Stateless threshold->gain->mute. Smoothing is applied in Phase 4."""
+    if not setting:
+        return value
+    if setting.get("mute", False):
+        return 0.0
+    threshold = float(setting.get("threshold", 0.0))
+    gain = float(setting.get("gain", 1.0))
+    v = max(0.0, value - threshold)
+    return v * gain
 
 
 def _hann_envelope(width: int) -> np.ndarray:
