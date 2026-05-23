@@ -9,6 +9,7 @@ class TransportStrip extends HTMLElement {
         this._wave = new Uint8Array(512);
         this._analyser = null;
         this._audioCtx = null;
+        this._loopRegion = null;     // { start, end } in seconds, or null
     }
 
     connectedCallback() {
@@ -16,6 +17,7 @@ class TransportStrip extends HTMLElement {
         this._attachListeners();
         document.addEventListener('project-loaded', (e) => this._onProjectLoaded(e.detail));
         document.addEventListener('transport-seek', (e) => this._seek(e.detail.t));
+        document.addEventListener('loop-toggle', () => this._toggleLoop());
         document.addEventListener('transport-sync-request', () => this._emitCurrentFrame());
         document.addEventListener('keydown', (e) => this._onKey(e));
     }
@@ -57,6 +59,19 @@ class TransportStrip extends HTMLElement {
         this._seek(target);
     }
 
+    _toggleLoop() {
+        if (this._loopRegion) {
+            this._loopRegion = null;
+        } else if (this.audio && this.bundle?.sections?.length) {
+            const t = this.audio.currentTime;
+            const sec = this.bundle.sections.find((s) => s.start <= t && t < s.end)
+                || this.bundle.sections[0];
+            this._loopRegion = { start: sec.start, end: sec.end };
+        }
+        document.dispatchEvent(new CustomEvent('loop-region-change',
+            { detail: this._loopRegion }));
+    }
+
     render() {
         this.innerHTML = `
             <div class="transport-strip">
@@ -76,6 +91,8 @@ class TransportStrip extends HTMLElement {
         if (this.audio) { this.audio.pause(); this.audio = null; }
         if (this._audioCtx) { try { await this._audioCtx.close(); } catch {} this._audioCtx = null; this._analyser = null; }
         this.bundle = null;
+        this._loopRegion = null;
+        document.dispatchEvent(new CustomEvent('loop-region-change', { detail: null }));
 
         if (!detail || !detail.audio_url) {
             this.querySelector('#ts-play').disabled = true;
@@ -151,6 +168,10 @@ class TransportStrip extends HTMLElement {
     }
 
     _tick() {
+        if (this._loopRegion && this.audio
+            && this.audio.currentTime >= this._loopRegion.end) {
+            this.audio.currentTime = this._loopRegion.start;
+        }
         this._emitAudioData();
         this._emitCurrentFrame();
     }
