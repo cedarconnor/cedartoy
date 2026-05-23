@@ -77,12 +77,24 @@ class TrackTimeline extends HTMLElement {
     _gutter(id) {
         const muted = this._isMuted(id);
         const soloed = this.soloIds.has(id);
+        const cs = this.trackSettings[id] || {};
+        const g = cs.gain == null ? 1 : cs.gain;
+        const th = cs.threshold || 0;
+        const sm = cs.smoothing || 0;
         return `<div class="tt-gutter${muted ? ' dim' : ''}" data-track="${id}">
             <span class="tt-name">${id}</span>
             <button data-action="mute" data-track="${id}"
                 class="tt-btn${muted ? ' on' : ''}">M</button>
             <button data-action="solo" data-track="${id}"
-                class="tt-btn${soloed ? ' on' : ''}">S</button></div>`;
+                class="tt-btn${soloed ? ' on' : ''}">S</button>
+            <div class="tt-cal">
+              <label>g<input type="range" data-action="gain" data-track="${id}"
+                 min="0" max="4" step="0.1" value="${g}"></label>
+              <label>t<input type="range" data-action="threshold" data-track="${id}"
+                 min="0" max="1" step="0.05" value="${th}"></label>
+              <label>s<input type="range" data-action="smoothing" data-track="${id}"
+                 min="0" max="1" step="0.05" value="${sm}"></label>
+            </div></div>`;
     }
 
     _laneSVG(id, i, health) {
@@ -124,6 +136,9 @@ class TrackTimeline extends HTMLElement {
         this.querySelectorAll('.tt-btn').forEach((btn) =>
             btn.addEventListener('click', () => this._toggle(
                 btn.dataset.action, btn.dataset.track)));
+        this.querySelectorAll('.tt-cal input').forEach((inp) =>
+            inp.addEventListener('input', () => this._calibrate(
+                inp.dataset.action, inp.dataset.track, parseFloat(inp.value))));
         const hit = this.querySelector('#tt-hit');
         hit.addEventListener('click', (e) => {
             const rect = hit.getBoundingClientRect();
@@ -146,6 +161,16 @@ class TrackTimeline extends HTMLElement {
             else this.soloIds.add(id);
         }
         this.draw();
+        document.dispatchEvent(new CustomEvent('track-settings-change', {
+            detail: { trackSettings: this.trackSettings, soloIds: this.soloIds },
+        }));
+    }
+
+    _calibrate(field, id, value) {
+        const cur = this.trackSettings[id] || {};
+        this.trackSettings[id] = { ...cur, [field]: value };
+        // Do NOT redraw here — re-rendering mid-drag drops slider focus, and
+        // lane shapes don't depend on calibration values.
         document.dispatchEvent(new CustomEvent('track-settings-change', {
             detail: { trackSettings: this.trackSettings, soloIds: this.soloIds },
         }));

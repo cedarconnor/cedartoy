@@ -181,3 +181,9 @@ body.validate-mode .cue-inspector { display: flex; flex-direction: column; }
 .cue-inspector .ci-loop { margin-left: auto; font-size: 11px; padding: 2px 8px; }
 .cue-inspector .ci-track { color: #556; }
 .cue-inspector .ci-track.ci-on { color: #7ec97e; }
+
+.track-timeline .tt-cal { display: none; gap: 4px; }
+body.validate-mode .track-timeline .tt-cal { display: flex; }
+.track-timeline .tt-cal label { display: flex; align-items: center; gap: 2px;
+    font-size: 9px; color: #778; }
+.track-timeline .tt-cal input[type="range"] { width: 46px; }
