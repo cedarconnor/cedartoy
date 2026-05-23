@@ -171,6 +171,7 @@ def config_to_job(cfg: dict) -> RenderJob:
         shutter=cfg["shutter"],
         default_output_format=cfg["default_output_format"],
         default_bit_depth=cfg["default_bit_depth"],
+        png_compress_level=int(cfg.get("png_compress_level", 1)),
         iMouse=(0.0, 0.0, 0.0, 0.0),
         iChannel_paths={},
         defines={},
@@ -191,6 +192,7 @@ def config_to_job(cfg: dict) -> RenderJob:
         bundle_path=Path(cfg["bundle_path"]) if cfg.get("bundle_path") else None,
         bundle_mode=cfg.get("bundle_mode", "auto"),
         bundle_blend=cfg.get("bundle_blend", 0.5),
+        track_settings=cfg.get("track_settings", {}),
     )
 
 def run_ui_server(args):

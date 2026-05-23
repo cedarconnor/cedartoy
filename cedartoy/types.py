@@ -80,3 +80,9 @@ class RenderJob:
     bundle_path: Optional[Path] = None
     bundle_mode: str = "auto"
     bundle_blend: float = 0.5
+
+    # Writer tuning
+    png_compress_level: int = 1       # PIL deflate level (0=none, 1=fastest, 9=smallest)
+
+    # Per-track reactivity settings: {track_id: {gain, mute, threshold, smoothing}}
+    track_settings: Dict[str, Any] = field(default_factory=dict)

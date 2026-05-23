@@ -34,16 +34,42 @@ def _mix_audio_textures(
     return cued
 
 
+def _writer_kwargs_for_format(fmt: str, png_compress_level: int = 1) -> tuple:
+    """Map an OutputFormat token to (filename_extension, imwrite_kwargs).
+
+    - `png` → .png with deflate level `png_compress_level` (default 1, fastest).
+    - `tif` → .tif uncompressed (largest, fastest write at huge frame sizes).
+    - `tif_lzw` → .tif with LZW (smaller than uncompressed, still much faster
+      than PNG default at high resolutions).
+    - `exr` → .exr, no extra kwargs (compression is set elsewhere).
+    Anything else falls through to the legacy "use fmt as extension" path.
+    """
+    if fmt == "png":
+        return "png", {"plugin": "pillow", "extension": ".png",
+                       "compress_level": max(0, min(9, int(png_compress_level)))}
+    if fmt == "tif":
+        return "tif", {"plugin": "pillow", "extension": ".tif",
+                       "compression": None}
+    if fmt == "tif_lzw":
+        return "tif", {"plugin": "pillow", "extension": ".tif",
+                       "compression": "tiff_lzw"}
+    if fmt == "exr":
+        return "exr", {}
+    # Fallback — unknown format string, write as-is and hope for the best.
+    return fmt, {}
+
+
 def _builtin_uniforms_from_eval(eval_frame) -> Dict[str, Any]:
     """Translate an EvalFrame (or None) into the five Phase 1 built-in uniforms."""
     if eval_frame is None:
         return {"iBpm": 0.0, "iBeat": 0.0, "iBar": 0,
-                "iSectionEnergy": 0.0, "iEnergy": 0.0}
+                "iSectionEnergy": 0.0, "iSectionId": 0, "iEnergy": 0.0}
     return {
         "iBpm": float(eval_frame.bpm),
         "iBeat": float(eval_frame.beat_phase),
         "iBar": int(eval_frame.bar),
         "iSectionEnergy": float(eval_frame.section_energy),
+        "iSectionId": int(eval_frame.section_id),
         "iEnergy": float(eval_frame.global_energy),
     }
 
@@ -107,6 +133,9 @@ def _hash_u32(x: int) -> int:
     return x & 0xFFFFFFFF
 
 def temporal_offsets(num_samples: int, frame_index: int) -> List[float]:
+    if num_samples <= 1:
+        return [0.5]
+
     offsets = []
     for s in range(num_samples):
         base = (s + 0.5) / num_samples
@@ -137,6 +166,9 @@ def subpixel_jitter(sample_index: int, frame_index: int, num_samples: int) -> Tu
     Returns offset in range [-0.5, 0.5] for both x and y.
     Uses Halton sequence for low-discrepancy sampling.
     """
+    if num_samples <= 1:
+        return (0.0, 0.0)
+
     # Use combined index for deterministic but varied samples per frame
     combined_index = frame_index * num_samples + sample_index
     hx, hy = halton_2d(combined_index)
@@ -210,6 +242,7 @@ class Renderer:
         self.spectrum_synth = None
         self.bundle_mode = getattr(job, "bundle_mode", "auto")
         self.bundle_blend = getattr(job, "bundle_blend", 0.5)
+        self.track_settings = getattr(job, "track_settings", {}) or {}
 
         if self.audio and self.bundle_mode != "raw" and job.audio_path is not None:
             from .musicue import BundleEvaluator, MusicalSpectrumSynth, load_for_audio
@@ -534,8 +567,14 @@ class Renderer:
                 img_data = left
 
         print(f"[LOG] render_frame: Writing output to {out_dir}", file=sys.stderr, flush=True)
-        out_file = resolve_output_path(out_dir, self.job.output_pattern, frame_idx, fmt)
-        iio.imwrite(out_file, img_data)
+        # Format token may differ from filename extension (tif_lzw → .tif) and
+        # carries its own writer kwargs (e.g. PNG compress_level, TIFF
+        # compression mode). PNG at default level 6 is the dominant cost at
+        # 8K+ frame sizes — level 1 typically cuts encode time 5–10× for a
+        # ~20–40% file-size penalty.
+        ext, write_kwargs = _writer_kwargs_for_format(fmt, self.job.png_compress_level)
+        out_file = resolve_output_path(out_dir, self.job.output_pattern, frame_idx, ext)
+        iio.imwrite(out_file, img_data, **write_kwargs)
 
         print(f"Frame {frame_idx} saved to {out_file.name}")
 
@@ -1020,7 +1059,8 @@ class Renderer:
                 raw_aud = self.audio.get_shadertoy_texture(frame_idx)
                 if self.bundle_eval is not None and self.spectrum_synth is not None:
                     eval_frame = self.bundle_eval.evaluate(frame_idx)
-                    cued_aud = self.spectrum_synth.synthesize(eval_frame)
+                    cued_aud = self.spectrum_synth.synthesize(
+                        eval_frame, self.track_settings)
                     aud_data = _mix_audio_textures(
                         raw_aud, cued_aud, self.bundle_mode, self.bundle_blend,
                     )
@@ -1032,8 +1072,9 @@ class Renderer:
         else:
             uni['iSampleRate'] = 0.0
 
-        # Built-in cuesheet/bundle uniforms (Phase 1)
-        uni.update(_builtin_uniforms_from_eval(eval_frame))
+        # Built-in cuesheet/bundle uniforms (Phase 1), with per-track mutes applied.
+        from .musicue import masked_builtin_uniforms
+        uni.update(masked_builtin_uniforms(eval_frame, self.track_settings))
 
         if self.history_tex:
             self.history_tex.use(location=4)
