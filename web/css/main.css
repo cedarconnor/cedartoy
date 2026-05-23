@@ -150,13 +150,17 @@ h2, h3, h4 {
     color: var(--text-secondary);
 }
 
-/* Validate mode: full-screen preview + docked track timeline. */
-body.validate-mode .app-main { grid-template-columns: 0 0 1fr; }
+/* Validate mode: full-screen preview + docked track timeline.
+   display:none removes the hidden panels from the grid, so the lone preview
+   wrapper must size to a single full-width column (not 0 0 1fr). */
+body.validate-mode .app-main { grid-template-columns: 1fr; }
 body.validate-mode .shader-browser-panel,
 body.validate-mode .config-editor-panel,
 body.validate-mode .render-panel-wrapper { display: none; }
 body.validate-mode .preview-panel-wrapper { width: 100%; }
-body.validate-mode #preview-canvas { width: 100%; height: auto; max-height: 70vh; }
+/* Height-driven so the canvas keeps its aspect ratio and stays on-screen. */
+body.validate-mode #preview-canvas {
+    height: 60vh; width: auto; max-width: 100%; display: block; margin: 0 auto; }
 
 .track-timeline { width: 100%; overflow-x: auto; }
 .track-timeline .tt-grid { display: grid; grid-template-columns: 130px 1fr; }

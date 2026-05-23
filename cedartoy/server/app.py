@@ -3,6 +3,20 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 
+
+class NoCacheStaticFiles(StaticFiles):
+    """Serve the dev UI with revalidation so edited JS/CSS never go stale.
+
+    The frontend uses manual ``?v=N`` query strings that are easy to forget to
+    bump; ``no-cache`` forces the browser to revalidate every asset (cheap 304s
+    when unchanged) so a returning browser always runs the current code.
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
+
 app = FastAPI(title="CedarToy Web UI", version="0.1.0")
 
 # CORS - restricted to localhost origins only for security
@@ -47,4 +61,4 @@ app.include_router(ws_router, prefix="/ws", tags=["websocket"])
 # Serve static files (frontend) - MUST be last to not intercept API routes
 web_dir = Path(__file__).parent.parent.parent / "web"
 if web_dir.exists():
-    app.mount("/", StaticFiles(directory=str(web_dir), html=True), name="static")
+    app.mount("/", NoCacheStaticFiles(directory=str(web_dir), html=True), name="static")
