@@ -1,8 +1,8 @@
 import { api } from './api.js';
 import './components/shader-browser.js?v=2';
 import './components/config-editor.js?v=4';
-import './components/preview-panel.js?v=6';
-import './components/transport-strip.js?v=5';
+import './components/preview-panel.js?v=10';
+import './components/transport-strip.js?v=6';
 import './components/render-panel.js?v=4';
 import './components/directory-browser.js?v=2';
 import './components/shader-editor.js?v=2';

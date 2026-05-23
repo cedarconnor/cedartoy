@@ -1,10 +1,14 @@
 import { api } from '../api.js';
-import { ShaderRenderer } from '../webgl/renderer.js';
+import { ShaderRenderer } from '../webgl/renderer.js?v=4';
 
 class PreviewPanel extends HTMLElement {
     constructor() {
         super();
         this.renderer = null;
+        this.hasAudioTimeline = false;
+        this.useAudioTimeline = false;
+        this._zeroFft = new Float32Array(512);
+        this._zeroWaveform = new Float32Array(512);
     }
 
     connectedCallback() {
@@ -13,19 +17,26 @@ class PreviewPanel extends HTMLElement {
 
         const canvas = this.querySelector('#preview-canvas');
         this.renderer = new ShaderRenderer(canvas);
+        this._setUseAudioTimeline(false);
 
         document.addEventListener('shader-select', async (e) => {
             await this.loadShader(e.detail.path);
         });
 
         document.addEventListener('audio-data', (e) => {
-            if (this.renderer) {
+            if (this.useAudioTimeline && this.renderer) {
                 this.renderer.updateAudioData(e.detail.fft, e.detail.waveform);
             }
         });
 
-        // Transport-strip drives time; preview-panel is a passive subscriber.
+        document.addEventListener('project-loaded', (e) => {
+            this.hasAudioTimeline = !!e.detail?.audio_url;
+            this._setUseAudioTimeline(!!e.detail?.audio_url);
+        });
+
+        // Transport-strip drives time only when preview is connected to it.
         document.addEventListener('transport-frame', (e) => {
+            if (!this.useAudioTimeline) return;
             if (this.renderer) {
                 this.renderer.currentTime = e.detail.timeSec || 0;
                 if (e.detail.bundle) {
@@ -52,6 +63,9 @@ class PreviewPanel extends HTMLElement {
                 if (slider) slider.value = tiltValue;
                 if (disp) disp.textContent = `${tiltValue}°`;
             }
+            if (config.shader_parameters && this.renderer) {
+                this.renderer.setShaderParameters(config.shader_parameters);
+            }
             if (this.renderer) this.renderer.render();
         });
     }
@@ -66,6 +80,13 @@ class PreviewPanel extends HTMLElement {
                     <div id="preview-error" style="display: none; position: absolute; top: 50%; left: 50%;
                         transform: translate(-50%, -50%); color: var(--error); font-weight: bold;">
                     </div>
+                </div>
+                <div class="preview-clock-controls" style="margin-top: 8px; display: flex; align-items: center; gap: 10px; font-size: 0.85rem;">
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                        <input type="checkbox" id="preview-use-timeline">
+                        <span>Use audio timeline</span>
+                    </label>
+                    <span id="preview-clock-mode" style="color: var(--text-secondary);">Free run</span>
                 </div>
                 <div class="camera-controls" style="margin-top: 8px; padding: 8px; background: var(--bg-secondary); border-radius: 4px;">
                     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
@@ -94,6 +115,11 @@ class PreviewPanel extends HTMLElement {
         const cameraModeSelect = this.querySelector('#camera-mode');
         const cameraTiltSlider = this.querySelector('#camera-tilt');
         const tiltDisplay = this.querySelector('#tilt-display');
+        const timelineToggle = this.querySelector('#preview-use-timeline');
+
+        timelineToggle.addEventListener('change', (e) => {
+            this._setUseAudioTimeline(e.target.checked);
+        });
 
         cameraModeSelect.addEventListener('change', (e) => {
             const modeIndex = parseInt(e.target.value);
@@ -124,6 +150,36 @@ class PreviewPanel extends HTMLElement {
         });
     }
 
+    _setUseAudioTimeline(useTimeline) {
+        this.useAudioTimeline = !!useTimeline && this.hasAudioTimeline;
+
+        const toggle = this.querySelector('#preview-use-timeline');
+        const modeLabel = this.querySelector('#preview-clock-mode');
+        if (toggle) {
+            toggle.checked = this.useAudioTimeline;
+            toggle.disabled = !this.hasAudioTimeline;
+            toggle.title = this.hasAudioTimeline ? '' : 'No audio timeline loaded';
+        }
+        if (modeLabel) {
+            modeLabel.textContent = this.useAudioTimeline ? 'Audio timeline' : 'Free run';
+        }
+
+        if (!this.renderer) return;
+
+        if (this.useAudioTimeline) {
+            this.renderer.pause();
+            document.dispatchEvent(new CustomEvent('transport-sync-request'));
+            this.renderer.render();
+            return;
+        }
+
+        this.renderer.updateAudioData(this._zeroFft, this._zeroWaveform);
+        this.renderer.updateBundleUniforms({});
+        if (!this.renderer.playing) {
+            this.renderer.play();
+        }
+    }
+
     async loadShader(path) {
         const errorDiv = this.querySelector('#preview-error');
         errorDiv.style.display = 'none';
@@ -132,6 +188,12 @@ class PreviewPanel extends HTMLElement {
         try {
             const shaderData = await api.getShader(path);
             this.renderer.compileShader(shaderData.source);
+            // Push any saved @param values from config-editor into the freshly
+            // compiled program so user-tuned values survive shader reloads.
+            const ce = document.querySelector('config-editor');
+            if (ce?.config?.shader_parameters) {
+                this.renderer.setShaderParameters(ce.config.shader_parameters);
+            }
             this.renderer.render();
         } catch (err) {
             ok = false;
