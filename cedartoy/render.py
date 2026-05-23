@@ -253,6 +253,22 @@ class Renderer:
             if result.bundle is not None:
                 self.bundle_eval = BundleEvaluator(result.bundle, fps=job.fps)
                 self.spectrum_synth = MusicalSpectrumSynth()
+                # Precompute per-track effective series (settings + causal
+                # smoothing) over 0..frame_end. Smoothing is stateful, so it
+                # must run from frame 0; preview mirrors this exactly.
+                from .musicue import BAND_TRACKS, _BAND_TRACK_SOURCE, apply_settings_series
+                n = int(self.job.frame_end) + 1
+                raw_series = {tid: [] for tid in BAND_TRACKS}
+                for fi in range(n):
+                    ef = self.bundle_eval.evaluate(fi)
+                    for tid in BAND_TRACKS:
+                        field, key = _BAND_TRACK_SOURCE[tid]
+                        raw_series[tid].append(float(getattr(ef, field).get(key, 0.0)))
+                self._eff_band_series = {
+                    tid: apply_settings_series(raw_series[tid], self.track_settings.get(tid))
+                    for tid in BAND_TRACKS
+                }
+                self._eff_series_len = n
                 if self.bundle_mode == "auto":
                     self.bundle_mode = "cued"
             elif self.bundle_mode == "auto":
@@ -1059,8 +1075,13 @@ class Renderer:
                 raw_aud = self.audio.get_shadertoy_texture(frame_idx)
                 if self.bundle_eval is not None and self.spectrum_synth is not None:
                     eval_frame = self.bundle_eval.evaluate(frame_idx)
-                    cued_aud = self.spectrum_synth.synthesize(
-                        eval_frame, self.track_settings)
+                    from .musicue import BAND_TRACKS
+                    idx = min(frame_idx, self._eff_series_len - 1)
+                    band_values = {tid: self._eff_band_series[tid][idx]
+                                   for tid in BAND_TRACKS}
+                    cued_aud = self.spectrum_synth.synthesize_effective(
+                        band_values, eval_frame.section_energy,
+                        eval_frame.beat_phase, eval_frame.global_energy)
                     aud_data = _mix_audio_textures(
                         raw_aud, cued_aud, self.bundle_mode, self.bundle_blend,
                     )

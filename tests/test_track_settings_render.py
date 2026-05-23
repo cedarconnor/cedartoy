@@ -26,3 +26,26 @@ def test_render_job_has_track_settings_default():
     # default_factory dict — constructing without it must work.
     sig = inspect.signature(RenderJob)
     assert "track_settings" in sig.parameters
+
+
+def test_effective_series_smoothing_reduces_and_smooths():
+    from cedartoy.musicue import apply_settings_series
+    raw = [0.0, 1.0, 0.0, 0.0, 0.0]
+    none = apply_settings_series(raw, None)
+    assert none == raw                            # no setting -> identity
+    sm = apply_settings_series(raw, {"smoothing": 0.5})
+    # one-pole low-pass: a jump is attenuated, then decays.
+    # sm[1]=0.5*1+0.5*0=0.5; sm[2]=0.25; sm[3]=0.125
+    assert abs(sm[1] - 0.5) < 1e-9
+    assert abs(sm[2] - 0.25) < 1e-9
+    assert abs(sm[3] - 0.125) < 1e-9
+    assert sm != raw                              # smoothing changed the series
+
+
+def test_renderer_builds_effective_band_series():
+    from cedartoy.musicue import apply_settings_series
+    raw_kick = [0.0, 0.8, 0.0, 0.0]
+    plain = apply_settings_series(raw_kick, {})
+    smoothed = apply_settings_series(raw_kick, {"smoothing": 0.6})
+    assert plain[2] == 0.0
+    assert smoothed[2] > 0.0                       # smoothing bleeds the onset forward
