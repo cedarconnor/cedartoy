@@ -35,6 +35,7 @@ def build_reactivity_prompt(
     shader_src: str,
     template_path: Path,
     cookbook_path: Path,
+    bundle_summary: str | None = None,
 ) -> str:
     """Substitute cookbook + shader into the template's marked slots."""
     template = template_path.read_text(encoding="utf-8")
@@ -47,7 +48,12 @@ def build_reactivity_prompt(
         raise ValueError(
             f"prompt template missing shader slot: {_SHADER_SLOT!r}"
         )
-    return template.replace(_COOKBOOK_SLOT, cookbook).replace(_SHADER_SLOT, shader_src)
+    out = template.replace(_COOKBOOK_SLOT, cookbook).replace(_SHADER_SLOT, shader_src)
+    if bundle_summary:
+        out += ("\n\n## This song's available MusiCue data\n"
+                "Map reactivity only to data that exists below; do not react to "
+                "empty/absent tracks.\n" + bundle_summary + "\n")
+    return out
 
 
 def build_fixit_prompt(

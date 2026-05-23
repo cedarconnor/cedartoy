@@ -12,7 +12,9 @@ from cedartoy.reactivity import (
     build_reactivity_prompt,
     parse_declared_uniforms,
 )
-from cedartoy.musicue import build_track_timeline, load_for_audio
+from cedartoy.musicue import (
+    build_track_timeline, load_for_audio, bundle_health, format_bundle_health,
+)
 
 router = APIRouter()
 
@@ -23,7 +25,7 @@ _COOKBOOK_PATH = _REPO_ROOT / "docs" / "reactivity" / "REACTIVITY_COOKBOOK.md"
 
 
 @router.get("/prompt")
-def reactivity_prompt(shader: str) -> dict:
+def reactivity_prompt(shader: str, audio: str | None = None) -> dict:
     """Return the full prompt text + uniform introspection for the named shader."""
     # Accept either 'shaders/foo.glsl' or 'foo.glsl'.
     rel = shader
@@ -46,10 +48,19 @@ def reactivity_prompt(shader: str) -> dict:
     bundle_declared = sorted(u for u in BUNDLE_UNIFORMS if u in declared)
     missing = sorted(u for u in BUNDLE_UNIFORMS if u not in declared)
 
+    bundle_summary = None
+    if audio:
+        audio_path = Path(audio)
+        if audio_path.exists():
+            result = load_for_audio(audio_path)
+            if result.bundle is not None:
+                bundle_summary = format_bundle_health(bundle_health(result.bundle))
+
     prompt = build_reactivity_prompt(
         shader_src=src,
         template_path=_PROMPT_PATH,
         cookbook_path=_COOKBOOK_PATH,
+        bundle_summary=bundle_summary,
     )
 
     return {

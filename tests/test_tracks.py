@@ -266,3 +266,21 @@ def test_synthesize_effective_matches_synthesize_for_same_values():
                                      frame.beat_phase, frame.global_energy)
     import numpy as np
     assert np.allclose(out, ref, atol=1e-6)
+
+
+def test_format_bundle_health_summary():
+    from cedartoy.musicue import format_bundle_health
+    health = {
+        "beats": {"present": True, "count": 240},
+        "sections": {"present": True, "count": 18},
+        "drums": {"kick": 84, "snare": 7, "hat": 94, "tom": 0},
+        "midi_energy": {"vocals": True, "bass": False},
+        "stems_energy": {"present": False},
+    }
+    s = format_bundle_health(health)
+    assert "beats: 240" in s
+    assert "sections: 18" in s
+    assert "kick(84)" in s and "hat(94)" in s
+    assert "tom" in s          # zero-count drum named as empty
+    assert "bass" in s         # empty stem named
+    assert "stems_energy" in s and "absent" in s.lower()

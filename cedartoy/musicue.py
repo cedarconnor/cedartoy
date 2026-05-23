@@ -441,6 +441,35 @@ def bundle_health(bundle: "MusiCueBundle") -> Dict[str, Any]:
     }
 
 
+def format_bundle_health(health: Dict[str, Any]) -> str:
+    """Human/Claude-readable summary of which bundle data exists.
+
+    Names empty/absent tracks explicitly so reactivity prompts avoid mapping
+    visuals to data that isn't there.
+    """
+    beats = health.get("beats", {})
+    sections = health.get("sections", {})
+    drums = health.get("drums", {})
+    midi = health.get("midi_energy", {})
+    stems = health.get("stems_energy", {})
+
+    present_drums = [f"{k}({v})" for k, v in drums.items() if v]
+    empty_drums = [k for k, v in drums.items() if not v]
+    present_stems = [k for k, v in midi.items() if v]
+    empty_stems = [k for k, v in midi.items() if not v]
+
+    lines = [
+        f"- beats: {beats.get('count', 0)} ({'present' if beats.get('present') else 'absent'})",
+        f"- sections: {sections.get('count', 0)} ({'present' if sections.get('present') else 'absent'})",
+        f"- drums present: {', '.join(present_drums) if present_drums else 'none'}",
+        f"- drums empty: {', '.join(empty_drums) if empty_drums else 'none'}",
+        f"- melodic stems present: {', '.join(present_stems) if present_stems else 'none'}",
+        f"- melodic stems empty: {', '.join(empty_stems) if empty_stems else 'none'}",
+        f"- stems_energy: {'present' if stems.get('present') else 'absent'}",
+    ]
+    return "\n".join(lines)
+
+
 def build_track_timeline(bundle: "MusiCueBundle", fps: float) -> Dict[str, Any]:
     """Whole-song per-track data for the UI: lane-draw shapes + health.
 
