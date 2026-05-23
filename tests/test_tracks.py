@@ -106,3 +106,53 @@ def test_masked_uniforms_none_frame():
     u = masked_builtin_uniforms(None, settings={"tempo": {"mute": True}})
     assert u == {"iBpm": 0.0, "iBeat": 0.0, "iBar": 0,
                  "iSectionEnergy": 0.0, "iSectionId": 0, "iEnergy": 0.0}
+
+
+from cedartoy.musicue import (
+    build_track_timeline, bundle_health, MusiCueBundle, TempoInfo,
+    BeatEvent, SectionBundleEntry, DrumOnset, StemEnergyCurve,
+)
+
+
+def _bundle():
+    return MusiCueBundle(
+        schema_version="1.0", source_sha256="x", duration_sec=4.0, fps=24.0,
+        tempo=TempoInfo(bpm_global=120.0, time_signature=[4, 4]),
+        beats=[BeatEvent(t=0.0, beat_in_bar=0, bar=0, is_downbeat=True),
+               BeatEvent(t=0.5, beat_in_bar=1, bar=0, is_downbeat=False)],
+        sections=[SectionBundleEntry(start=0.0, end=2.0, label="verse",
+                                     energy_rank=0.3),
+                  SectionBundleEntry(start=2.0, end=4.0, label="chorus",
+                                     energy_rank=0.9)],
+        drums={"kick": [DrumOnset(t=0.0, strength=0.9),
+                        DrumOnset(t=1.0, strength=0.7)],
+               "hat": []},
+        midi={}, midi_energy={"vocals": StemEnergyCurve(hop_sec=0.5,
+                                                        values=[0.1, 0.2, 0.3])},
+        stems_energy={},
+        global_energy=StemEnergyCurve(hop_sec=0.5, values=[0.2, 0.4]),
+        cuesheet={},
+    )
+
+
+def test_build_track_timeline_shape():
+    tl = build_track_timeline(_bundle(), fps=24.0)
+    assert tl["fps"] == 24.0 and tl["duration_sec"] == 4.0
+    assert tl["bands"] == ["low", "low_mid", "mid_hi", "high"]
+    assert tl["tracks"]["drums.kick"]["band"] == "low"
+    assert len(tl["tracks"]["drums.kick"]["onsets"]) == 2
+    assert tl["tracks"]["drums.kick"]["onsets"][0] == {"t": 0.0, "strength": 0.9}
+    assert tl["tracks"]["stem.vocals"]["curve"]["values"] == [0.1, 0.2, 0.3]
+    assert tl["tracks"]["sections"]["blocks"][1]["label"] == "chorus"
+    assert tl["tracks"]["tempo"]["bpm"] == 120.0
+
+
+def test_bundle_health_flags_empty_fields():
+    h = bundle_health(_bundle())
+    assert h["beats"] == {"present": True, "count": 2}
+    assert h["sections"] == {"present": True, "count": 2}
+    assert h["drums"]["kick"] == 2
+    assert h["drums"]["hat"] == 0
+    assert h["midi_energy"]["vocals"] is True
+    assert h["midi_energy"].get("bass", False) is False
+    assert h["stems_energy"]["present"] is False

@@ -389,6 +389,68 @@ class MusicalSpectrumSynth:
         return tex
 
 
+def bundle_health(bundle: "MusiCueBundle") -> Dict[str, Any]:
+    """Report which bundle fields are populated (UI data-quality surface)."""
+    return {
+        "beats": {"present": bool(bundle.beats), "count": len(bundle.beats)},
+        "sections": {"present": bool(bundle.sections),
+                     "count": len(bundle.sections)},
+        "drums": {cls: len(events) for cls, events in bundle.drums.items()},
+        "midi_energy": {stem: bool(curve.values)
+                        for stem, curve in bundle.midi_energy.items()},
+        "stems_energy": {"present": any(
+            bool(c.values) for c in bundle.stems_energy.values())},
+    }
+
+
+def build_track_timeline(bundle: "MusiCueBundle", fps: float) -> Dict[str, Any]:
+    """Whole-song per-track data for the UI: lane-draw shapes + health.
+
+    Ships RAW per-track data; consumers (preview/render) apply track_settings.
+    """
+    duration = float(bundle.duration_sec)
+    tracks: Dict[str, Any] = {}
+
+    for track_id, band in BAND_TRACKS.items():
+        src_field, key = _BAND_TRACK_SOURCE[track_id]
+        if src_field == "drum_pulses":
+            events = bundle.drums.get(key, [])
+            tracks[track_id] = {
+                "band": band,
+                "onsets": [{"t": o.t, "strength": o.strength} for o in events],
+            }
+        else:  # midi_energy curve
+            curve = bundle.midi_energy.get(key)
+            tracks[track_id] = {
+                "band": band,
+                "curve": {"hop_sec": curve.hop_sec, "values": list(curve.values)}
+                if curve else {"hop_sec": 0.0, "values": []},
+            }
+
+    tracks["tempo"] = {
+        "bpm": bundle.tempo.bpm_global,
+        "beats": [{"t": b.t, "isDownbeat": b.is_downbeat, "bar": b.bar,
+                   "beatInBar": b.beat_in_bar} for b in bundle.beats],
+    }
+    tracks["sections"] = {
+        "blocks": [{"start": s.start, "end": s.end, "label": s.label,
+                    "energyRank": s.energy_rank} for s in bundle.sections],
+    }
+    tracks["energy"] = {
+        "curve": {"hop_sec": bundle.global_energy.hop_sec,
+                  "values": list(bundle.global_energy.values)},
+    }
+
+    return {
+        "fps": float(fps),
+        "duration_sec": duration,
+        "frames": int(round(duration * fps)),
+        "bands": ["low", "low_mid", "mid_hi", "high"],
+        "tracks": tracks,
+        "health": bundle_health(bundle),
+    }
+
+
 @dataclass
 class BundleLoadResult:
     bundle: Optional[MusiCueBundle] = None
