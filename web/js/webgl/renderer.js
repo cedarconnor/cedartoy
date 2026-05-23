@@ -25,7 +25,14 @@ export class ShaderRenderer {
 
         // MusiCue bundle uniforms — updated each transport-frame by preview-panel.
         // All zeros when no bundle / no audio is playing.
-        this.bundleUniforms = { bpm: 0, beat: 0, bar: 0, energy: 0, sectionEnergy: 0 };
+        this.bundleUniforms = { bpm: 0, beat: 0, bar: 0, energy: 0, sectionEnergy: 0, sectionId: 0 };
+
+        // @param-declared shader uniforms. Populated by compileShader from
+        // `// @param name type default min max "label"` lines in the source.
+        // shaderParams[i] = {name, type, default}; values are kept in
+        // shaderParamValues so setShaderParameters() can override per-frame.
+        this.shaderParams = [];
+        this.shaderParamValues = {};
 
         // Mouse tracking for iMouse uniform
         this.mouseX = 0;
@@ -54,6 +61,35 @@ export class ShaderRenderer {
         this.canvas.addEventListener('mouseup', this._onMouseUp);
     }
 
+    /** Parse `// @param name type default min max "label"` lines out of the
+     * shader source. Mirrors the server-side _parse_shader_metadata regex so
+     * the preview can bind defaults that the @param system only feeds in the
+     * headless render path. Without this, any shader that drives motion off a
+     * `@param` uniform (e.g. `iTime * pulse_speed`) would see the uniform as
+     * zero in preview and freeze. */
+    _parseShaderParams(source) {
+        const re = /^[ \t]*\/\/[ \t]*@param[ \t]+(\w+)[ \t]+(\w+)[ \t]+(\S+)[ \t]+\S+[ \t]+\S+[ \t]+.+$/gm;
+        const out = [];
+        let m;
+        while ((m = re.exec(source)) !== null) {
+            const [, name, type, defStr] = m;
+            const value = type === 'int' ? parseInt(defStr, 10) : parseFloat(defStr);
+            out.push({ name, type, default: value });
+        }
+        return out;
+    }
+
+    /** Override @param values. Names not in `values` keep their parsed default.
+     * Names not declared in the shader are ignored. */
+    setShaderParameters(values) {
+        if (!values || !this.shaderParamValues) return;
+        for (const k of Object.keys(values)) {
+            if (k in this.shaderParamValues) {
+                this.shaderParamValues[k] = values[k];
+            }
+        }
+    }
+
     /** Update the cached MusiCue bundle uniforms. Called per frame by preview-panel. */
     updateBundleUniforms(u) {
         if (!u) return;
@@ -63,6 +99,7 @@ export class ShaderRenderer {
             bar: u.bar || 0,
             energy: u.energy || 0,
             sectionEnergy: u.sectionEnergy || 0,
+            sectionId: u.sectionId || 0,
         };
     }
 
@@ -141,6 +178,7 @@ export class ShaderRenderer {
             iBeat: gl.getUniformLocation(this.program, 'iBeat'),
             iBar: gl.getUniformLocation(this.program, 'iBar'),
             iSectionEnergy: gl.getUniformLocation(this.program, 'iSectionEnergy'),
+            iSectionId: gl.getUniformLocation(this.program, 'iSectionId'),
             iEnergy: gl.getUniformLocation(this.program, 'iEnergy'),
         };
 
@@ -150,6 +188,20 @@ export class ShaderRenderer {
         for (let i = 0; i < 4; i++) {
             this.uniforms.iChannelTime[i] = gl.getUniformLocation(this.program, `iChannelTime[${i}]`);
             this.uniforms.iChannelResolution[i] = gl.getUniformLocation(this.program, `iChannelResolution[${i}]`);
+        }
+
+        // Parse @param declarations and prepare per-param uniform bindings.
+        // Keep previously-set values where the param name still exists so a
+        // recompile (e.g. fix-it round trip) doesn't snap sliders back to
+        // their defaults; otherwise initialise from parsed defaults.
+        const prevValues = this.shaderParamValues || {};
+        this.shaderParams = this._parseShaderParams(source);
+        this.shaderParamValues = {};
+        for (const p of this.shaderParams) {
+            this.uniforms[p.name] = gl.getUniformLocation(this.program, p.name);
+            this.shaderParamValues[p.name] = (p.name in prevValues)
+                ? prevValues[p.name]
+                : p.default;
         }
 
         // Create fullscreen quad
@@ -174,6 +226,20 @@ export class ShaderRenderer {
         cleanSource = cleanSource.replace(/uniform\s+sampler2D\s+iChannel3\s*;/g, '');
         cleanSource = cleanSource.replace(/uniform\s+float\s+iChannelTime\s*\[\s*4\s*\]\s*;/g, '');
         cleanSource = cleanSource.replace(/uniform\s+vec3\s+iChannelResolution\s*\[\s*4\s*\]\s*;/g, '');
+        // MusiCue bundle uniforms — the cookbook tells shader authors to declare
+        // these, but our wrapper also prepends them. Strip the author copy to
+        // avoid `redefinition` errors at compile time.
+        cleanSource = cleanSource.replace(/uniform\s+float\s+iBpm\s*;/g, '');
+        cleanSource = cleanSource.replace(/uniform\s+float\s+iBeat\s*;/g, '');
+        cleanSource = cleanSource.replace(/uniform\s+int\s+iBar\s*;/g, '');
+        cleanSource = cleanSource.replace(/uniform\s+float\s+iSectionEnergy\s*;/g, '');
+        cleanSource = cleanSource.replace(/uniform\s+int\s+iSectionId\s*;/g, '');
+        cleanSource = cleanSource.replace(/uniform\s+float\s+iEnergy\s*;/g, '');
+        // CedarToy camera/jitter uniforms — same reasoning.
+        cleanSource = cleanSource.replace(/uniform\s+int\s+iCameraMode\s*;/g, '');
+        cleanSource = cleanSource.replace(/uniform\s+float\s+iCameraTiltDeg\s*;/g, '');
+        cleanSource = cleanSource.replace(/uniform\s+vec2\s+iJitter\s*;/g, '');
+        cleanSource = cleanSource.replace(/uniform\s+int\s+iSampleIndex\s*;/g, '');
 
         // Strip fragColor output if it exists
         cleanSource = cleanSource.replace(/out\s+vec4\s+fragColor\s*;/g, '');
@@ -208,6 +274,7 @@ export class ShaderRenderer {
         finalShader += 'uniform float iBeat;\n';
         finalShader += 'uniform int   iBar;\n';
         finalShader += 'uniform float iSectionEnergy;\n';
+        finalShader += 'uniform int   iSectionId;\n';
         finalShader += 'uniform float iEnergy;\n\n';
         finalShader += 'out vec4 fragColor;\n\n';
 
@@ -381,7 +448,20 @@ vec3 cameraDirLL180(vec2 uv, float tiltDeg, mat3 camBasis) {
         if (this.uniforms.iBeat !== null) gl.uniform1f(this.uniforms.iBeat, bu.beat);
         if (this.uniforms.iBar !== null) gl.uniform1i(this.uniforms.iBar, bu.bar | 0);
         if (this.uniforms.iSectionEnergy !== null) gl.uniform1f(this.uniforms.iSectionEnergy, bu.sectionEnergy);
+        if (this.uniforms.iSectionId !== null) gl.uniform1i(this.uniforms.iSectionId, bu.sectionId | 0);
         if (this.uniforms.iEnergy !== null) gl.uniform1f(this.uniforms.iEnergy, bu.energy);
+
+        // @param uniforms — keeps shaders that drive motion off these (e.g.
+        // `iTime * pulse_speed`) from freezing when the param isn't otherwise
+        // set. Headless render binds the same values via the job's
+        // shader_parameters dict; preview now matches.
+        for (const p of this.shaderParams) {
+            const loc = this.uniforms[p.name];
+            if (loc === null) continue;
+            const v = this.shaderParamValues[p.name];
+            if (p.type === 'int') gl.uniform1i(loc, v | 0);
+            else gl.uniform1f(loc, +v);
+        }
 
         // Draw
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);

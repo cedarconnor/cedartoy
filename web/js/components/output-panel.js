@@ -162,9 +162,11 @@ class OutputPanel extends HTMLElement {
                     <div class="output-card">
                         <div class="output-card-title">File</div>
                         <div class="output-row">
-                            <label title="Output image format. PNG is lossless 8-bit/16-bit; EXR carries 16- or 32-bit float for HDR pipelines.">Format</label>
-                            <select id="out-format" title="PNG for delivery; EXR for HDR / compositing.">
-                                <option value="png" ${this.config.default_output_format==='png'?'selected':''}>PNG</option>
+                            <label title="Output image format. PNG is lossless 8-bit (deflate level 1, fast); TIFF is much faster at 8K+ frame sizes; EXR carries 16- or 32-bit float for HDR pipelines.">Format</label>
+                            <select id="out-format" title="PNG for delivery; TIFF for fast intermediate frames at large resolutions; EXR for HDR / compositing.">
+                                <option value="png" ${this.config.default_output_format==='png'?'selected':''}>PNG (deflate level 1)</option>
+                                <option value="tif" ${this.config.default_output_format==='tif'?'selected':''}>TIFF (uncompressed, fastest)</option>
+                                <option value="tif_lzw" ${this.config.default_output_format==='tif_lzw'?'selected':''}>TIFF (LZW, smaller)</option>
                                 <option value="exr" ${this.config.default_output_format==='exr'?'selected':''}>EXR</option>
                             </select>
                         </div>
