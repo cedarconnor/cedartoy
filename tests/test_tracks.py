@@ -156,3 +156,31 @@ def test_bundle_health_flags_empty_fields():
     assert h["midi_energy"]["vocals"] is True
     assert h["midi_energy"].get("bass", False) is False
     assert h["stems_energy"]["present"] is False
+
+
+def test_timeline_includes_per_frame_arrays():
+    b = _bundle()                      # duration 4.0s, fps 24 -> 96 frames
+    tl = build_track_timeline(b, fps=24.0)
+    n = tl["frames"]
+    assert n == 96
+    fr = tl["frame_data"]
+    # band tracks each carry an n-length scalar array
+    assert len(fr["tracks"]["drums.kick"]) == n
+    assert len(fr["tracks"]["stem.vocals"]) == n
+    # uniform series present and n-length
+    for key in ("bpm", "beat", "bar", "sectionEnergy", "sectionId", "energy"):
+        assert len(fr["uniforms"][key]) == n
+    # kick fires at t=0 (frame 0) with strength ~0.9 (ADSR peak)
+    assert fr["tracks"]["drums.kick"][0] > 0.5
+
+
+def test_timeline_frame_scalars_match_evaluator():
+    from cedartoy.musicue import BundleEvaluator
+    b = _bundle()
+    tl = build_track_timeline(b, fps=24.0)
+    ev = BundleEvaluator(b, fps=24.0)
+    f10 = ev.evaluate(10)
+    assert abs(tl["frame_data"]["tracks"]["drums.kick"][10]
+               - f10.drum_pulses.get("kick", 0.0)) < 1e-6
+    assert abs(tl["frame_data"]["uniforms"]["energy"][10]
+               - f10.global_energy) < 1e-6

@@ -441,12 +441,34 @@ def build_track_timeline(bundle: "MusiCueBundle", fps: float) -> Dict[str, Any]:
                   "values": list(bundle.global_energy.values)},
     }
 
+    # Per-frame data the browser sums to compose iChannel0 + uniforms. Python
+    # (BundleEvaluator) stays the canonical evaluator; the client only sums.
+    n_frames = int(round(duration * fps))
+    evaluator = BundleEvaluator(bundle, fps=fps)
+    frame_tracks: Dict[str, List[float]] = {tid: [] for tid in BAND_TRACKS}
+    uni_series: Dict[str, List[float]] = {
+        "bpm": [], "beat": [], "bar": [],
+        "sectionEnergy": [], "sectionId": [], "energy": [],
+    }
+    for f in range(n_frames):
+        ef = evaluator.evaluate(f)
+        for tid in BAND_TRACKS:
+            src_field, key = _BAND_TRACK_SOURCE[tid]
+            frame_tracks[tid].append(float(getattr(ef, src_field).get(key, 0.0)))
+        uni_series["bpm"].append(float(ef.bpm))
+        uni_series["beat"].append(float(ef.beat_phase))
+        uni_series["bar"].append(int(ef.bar))
+        uni_series["sectionEnergy"].append(float(ef.section_energy))
+        uni_series["sectionId"].append(int(ef.section_id))
+        uni_series["energy"].append(float(ef.global_energy))
+
     return {
         "fps": float(fps),
         "duration_sec": duration,
-        "frames": int(round(duration * fps)),
+        "frames": n_frames,
         "bands": ["low", "low_mid", "mid_hi", "high"],
         "tracks": tracks,
+        "frame_data": {"tracks": frame_tracks, "uniforms": uni_series},
         "health": bundle_health(bundle),
     }
 
