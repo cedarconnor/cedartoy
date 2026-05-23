@@ -14,6 +14,7 @@ import './components/output-panel.js?v=4';
 import './components/cue-scrubber.js?v=3';
 import './components/track-timeline.js?v=1';
 import './components/cue-inspector.js?v=1';
+import './components/ab-grid.js?v=1';
 
 // Global app state
 window.cedartoy = {
@@ -96,6 +97,17 @@ if (validateToggle) {
                 checkbox.dispatchEvent(new Event('change'));
             }
         }
+        window.dispatchEvent(new Event('resize'));
+    });
+}
+
+const abToggle = document.getElementById('ab-toggle');
+if (abToggle) {
+    abToggle.addEventListener('click', () => {
+        const on = document.body.classList.toggle('ab-mode');
+        abToggle.classList.toggle('btn-primary', on);
+        const grid = document.querySelector('ab-grid');
+        if (grid && typeof grid.setActive === 'function') grid.setActive(on);
         window.dispatchEvent(new Event('resize'));
     });
 }
