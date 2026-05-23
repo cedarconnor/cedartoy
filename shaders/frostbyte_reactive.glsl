@@ -7,6 +7,7 @@ uniform float iBpm;
 uniform float iBeat;
 uniform int   iBar;
 uniform float iSectionEnergy;
+uniform int   iSectionId;       // stable per-label id (verse=N, chorus=M, ...)
 uniform float iEnergy;
 
 //2d rotation matrix
@@ -42,6 +43,19 @@ void mainImage(out vec4 o,in vec2 u){
     vec2 uPump = (u - iResolution.xy * 0.5) * zoomMul + iResolution.xy * 0.5;
     d=normalize(vec3(2.*uPump-iResolution.xy,iResolution.y));
 
+    // === camera_rock_subtle (custom) ===
+    // Gentle roll of the ray direction on a continuous tempo clock. Do not
+    // use float(iBar) + iBeat here: iBeat resets every beat while iBar changes
+    // once per bar, which creates visible camera stutter.
+    float tempoBeat = iTime * max(iBpm, 0.0) / 60.0;
+    float rockEnabled = step(1.0, iBpm);
+    float rockAngle = rockEnabled * (
+        sin(tempoBeat * 0.3927) * 0.030       // slow ~16-beat sway
+      + sin(tempoBeat * 1.5708) * 0.008       // 1/4-bar nudge
+    );
+    d.xy = mat2(cos(rockAngle), -sin(rockAngle),
+                sin(rockAngle),  cos(rockAngle)) * d.xy;
+
     // === kick_pulse_camera (cookbook_version 1) ===
     float kickEnergy = texture(iChannel0, vec2(0.03, 0.25)).r;
     p.z += kickEnergy * 0.08;
@@ -66,10 +80,23 @@ void mainImage(out vec4 o,in vec2 u){
     // === section_palette_shift (cookbook_version 1) ===
     float palette = float(iBar / 8) + iSectionEnergy * 0.5;
 
+    // === noise_scale_breathe (custom) ===
+    // Modulate the inner noise feature scale by global energy. The pattern
+    // itself morphs — denser features during high-energy moments, looser
+    // structure in quiet passages.
+    float noiseScale = mix(9.0, 15.0, iEnergy);
+
+    // === swirl_whip_on_kick (custom) ===
+    // Add kick-band energy as a small ADDITIVE rotation offset. Do NOT
+    // multiply iTime by the kick — at large t a volatile rate produces
+    // many radians of jitter per frame and the field spins chaotically.
+    float kick = texture(iChannel0, vec2(0.03, 0.25)).r;
+    float swirlOffset = kick * 0.6;
+
     for(o*=i;i<10.;i++){
         b=p;
-        b.xy=r(sin(b.xy),t*1.5+b.z*3.);
-        s=.001+abs(n(b*12.)/12.-n(b))*.4;
+        b.xy=r(sin(b.xy),t*1.5+b.z*3.+swirlOffset);
+        s=.001+abs(n(b*noiseScale)/12.-n(b))*.4;
         s=max(s,2.-length(p.xy));
         s+=abs(p.y*.75+sin(p.z+t*.1+p.x*1.5))*.2;
         p+=d*s;
@@ -80,16 +107,22 @@ void mainImage(out vec4 o,in vec2 u){
     // === energy_brightness_lift (cookbook_version 1) ===
     col *= mix(0.9, 1.15, iEnergy);
 
-    // === bar_anchored_strobe (cookbook_version 1) ===
-    bool onBarStart = iBeat < 0.04 && (iBar % 4) == 0;
-    if (onBarStart && iSectionEnergy > 0.6) {
-        col += vec3(0.5);
-    }
+    // === section_color_wash (custom, replaces bar_anchored_strobe) ===
+    // Tint the image toward a section-type-derived accent colour. iSectionId
+    // is stable per label (all verses share one id, all choruses another),
+    // so the colour changes ONLY on verse/chorus/bridge boundaries — not
+    // every 8 bars. Strength is gentle; the image never blanks.
+    float sid = float(iSectionId);
+    vec3 accent = 0.5 + 0.5 * sin(sid * 1.7 + vec3(0.0, 2.094, 4.189));
+    col = mix(col, col * accent * 1.2, iSectionEnergy * 0.35);
 
-    // === hat_grain (cookbook_version 1) ===
+    // === hat_shimmer (custom, replaces hat_grain) ===
+    // Hi-hat energy adds a low-amplitude radial shimmer instead of film
+    // grain — reads as motion locked to the hat instead of texture noise.
     float hat = texture(iChannel0, vec2(0.35, 0.25)).r;
-    float noise = fract(sin(dot(u, vec2(12.9898, 78.233))) * 43758.5453);
-    col += (noise - 0.5) * hat * 0.04;
+    vec2 cuv = (u - iResolution.xy * 0.5) / iResolution.y;
+    float shimmer = sin(length(cuv) * 40.0 - t * 6.0) * hat * 0.06;
+    col += col * shimmer;
 
     o.rgb = col;
     o.a = 1.0;

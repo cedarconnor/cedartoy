@@ -13,7 +13,9 @@ vec2 W(vec2 p){
         p += sin(p.yx + t + vec2(1.57, 0))/2.;
         p *= 1.3;
     }
-    p += fract(sin(p+vec2(13, 7))*5e5)*.03 - .015;
+    vec2 micro = sin(p * 37.0 + vec2(13.0, 7.0)) *
+                 sin(p.yx * 19.0 + vec2(5.0, 11.0));
+    p += micro * 0.006;
     return mod(p, 2.) - 1.; 
 }
 
