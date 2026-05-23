@@ -42,4 +42,5 @@ def test_builtin_uniforms_from_eval_frame():
 
 def test_builtin_uniforms_none_returns_defaults():
     uni = _builtin_uniforms_from_eval(None)
-    assert uni == {"iBpm": 0.0, "iBeat": 0.0, "iBar": 0, "iSectionEnergy": 0.0, "iEnergy": 0.0}
+    assert uni == {"iBpm": 0.0, "iBeat": 0.0, "iBar": 0,
+                   "iSectionEnergy": 0.0, "iSectionId": 0, "iEnergy": 0.0}

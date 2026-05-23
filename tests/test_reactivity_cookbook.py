@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 COOKBOOK = Path(__file__).parent.parent / "docs" / "reactivity" / "REACTIVITY_COOKBOOK.md"
+SHADERS_DIR = Path(__file__).parent.parent / "shaders"
 
 SHELL = """\
 #version 330
@@ -24,11 +25,13 @@ uniform float     iBpm;
 uniform float     iBeat;
 uniform int       iBar;
 uniform float     iSectionEnergy;
+uniform int       iSectionId;
 uniform float     iEnergy;
 
 out vec4 fragColor;
 
 vec3 cameraForward = vec3(0.0, 0.0, 1.0);
+vec3 d = vec3(0.0, 0.0, 1.0);
 vec3 col = vec3(0.5);
 
 void main() {
@@ -39,9 +42,17 @@ void main() {
 """
 
 EXPECTED_NAMES = {
-    "kick_pulse_camera", "beat_pump_zoom", "section_palette_shift",
-    "energy_brightness_lift", "bar_anchored_strobe",
-    "melodic_glow_tint", "hat_grain",
+    # Inner-loop modulations
+    "noise_scale_breathe", "iteration_swell", "swirl_whip_on_kick",
+    "fold_strength_pulse",
+    # Camera & UV
+    "kick_pulse_camera", "beat_pump_zoom", "camera_rock_subtle",
+    "hat_shimmer",
+    # Colour & palette
+    "section_palette_shift", "section_color_wash",
+    "beat_phase_color_dance", "melodic_glow_tint",
+    # Time-anchored events
+    "bar_anchored_strobe", "kick_displace",
 }
 
 
@@ -57,7 +68,7 @@ def _extract_snippets(md: str) -> list[tuple[str, str]]:
     return out
 
 
-def test_cookbook_extracts_seven_snippets():
+def test_cookbook_extracts_expected_snippets():
     md = COOKBOOK.read_text(encoding="utf-8")
     snippets = _extract_snippets(md)
     names = {n for n, _ in snippets}
@@ -66,7 +77,7 @@ def test_cookbook_extracts_seven_snippets():
 
 def test_cookbook_header_carries_version():
     md = COOKBOOK.read_text(encoding="utf-8")
-    assert "cookbook_version: 1" in md
+    assert "cookbook_version: 2" in md
 
 
 @pytest.fixture(scope="module")
@@ -74,7 +85,7 @@ def glslang_available():
     return shutil.which("glslangValidator") is not None
 
 
-@pytest.mark.parametrize("snippet_index", list(range(7)))
+@pytest.mark.parametrize("snippet_index", list(range(len(EXPECTED_NAMES))))
 def test_cookbook_snippet_compiles(tmp_path, glslang_available, snippet_index):
     md = COOKBOOK.read_text(encoding="utf-8")
     snippets = _extract_snippets(md)
@@ -97,4 +108,20 @@ def test_cookbook_snippet_compiles(tmp_path, glslang_available, snippet_index):
     )
     assert res.returncode == 0, (
         f"glslang failed on {name}:\n{res.stdout}\n{res.stderr}"
+    )
+
+
+def test_reactive_shaders_do_not_use_discontinuous_bar_beat_camera_clock():
+    bad = []
+    discontinuous_clock = re.compile(r"float\s*\(\s*iBar\s*\)\s*\+\s*iBeat")
+    for shader in SHADERS_DIR.glob("*_reactive.glsl"):
+        text = shader.read_text(encoding="utf-8")
+        code = "\n".join(line.split("//", 1)[0] for line in text.splitlines())
+        if discontinuous_clock.search(code):
+            bad.append(shader.name)
+
+    assert bad == [], (
+        "Reactive shaders must not use float(iBar) + iBeat as a smooth "
+        "motion clock; iBeat resets every beat while iBar changes once per bar: "
+        + ", ".join(bad)
     )

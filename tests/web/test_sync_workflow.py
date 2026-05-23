@@ -7,8 +7,10 @@ a project folder at D:/temp/cedartoy_browser_test_export.
 """
 from __future__ import annotations
 
+import socket
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -25,8 +27,27 @@ def _skip_if_no_project():
         pytest.skip(f"Test project not at {PROJECT_PATH}")
 
 
+def _skip_if_no_server():
+    """Skip when the UI server isn't already running.
+
+    This test drives a live CedarToy UI; it doesn't start one. A fresh
+    checkout running `pytest -q` would otherwise hit ERR_CONNECTION_REFUSED
+    in Playwright's page.goto and surface as a test failure rather than a
+    skip.
+    """
+    parsed = urlparse(URL)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        with socket.create_connection((host, port), timeout=0.5):
+            pass
+    except OSError:
+        pytest.skip(f"UI server not reachable at {URL}")
+
+
 def test_unified_sync_workflow():
     _skip_if_no_project()
+    _skip_if_no_server()
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         ctx = browser.new_context(viewport={"width": 1440, "height": 900})

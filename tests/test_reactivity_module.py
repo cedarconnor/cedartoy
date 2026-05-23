@@ -41,7 +41,8 @@ def test_parse_ignores_uniforms_inside_comments():
 
 def test_bundle_uniforms_set_matches_spec():
     assert set(BUNDLE_UNIFORMS) == {
-        "iBpm", "iBeat", "iBar", "iSectionEnergy", "iEnergy", "iChannel0",
+        "iBpm", "iBeat", "iBar", "iSectionEnergy", "iSectionId",
+        "iEnergy", "iChannel0",
     }
 
 
