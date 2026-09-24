@@ -15,6 +15,7 @@ import './components/cue-scrubber.js?v=3';
 import './components/track-timeline.js?v=1';
 import './components/cue-inspector.js?v=1';
 import './components/ab-grid.js?v=1';
+import './components/reactivity-scorecard.js?v=1';
 
 // Global app state
 window.cedartoy = {
