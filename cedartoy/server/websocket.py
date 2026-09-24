@@ -48,6 +48,16 @@ async def handle_render(websocket: WebSocket, data):
         await websocket.send_json({"type": "render_error", "message": "Render job not found", "job_id": job_id})
         return
 
+    # Only a still-queued job may start; a repeated start_render (double
+    # click, reconnect, second tab) must not spawn a second render process.
+    if not job_manager.claim_job(job_id):
+        await websocket.send_json({
+            "type": "render_error",
+            "job_id": job_id,
+            "message": f"Render job already {job.status.value}",
+        })
+        return
+
     cmd = [sys.executable, "-m", "cedartoy.cli", "render", "--config", str(job.config_file)]
 
     try:

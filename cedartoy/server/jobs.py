@@ -1,3 +1,4 @@
+import threading
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -45,6 +46,7 @@ class RenderJobManager:
         self.work_dir = Path(work_dir)
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self._jobs: Dict[str, RenderJobRecord] = {}
+        self._lock = threading.Lock()
 
     def create_job(self, config: Dict[str, Any]) -> RenderJobRecord:
         job_id = uuid4().hex
@@ -58,6 +60,20 @@ class RenderJobManager:
 
     def get_job(self, job_id: str) -> RenderJobRecord:
         return self._jobs[job_id]
+
+    def claim_job(self, job_id: str) -> bool:
+        """Atomically move a QUEUED job to RUNNING.
+
+        Returns False if the job was already started (or finished/cancelled),
+        so a duplicate start request can't launch a second render process.
+        """
+        with self._lock:
+            job = self.get_job(job_id)
+            if job.status != JobStatus.QUEUED:
+                return False
+            job.status = JobStatus.RUNNING
+            self._touch(job)
+            return True
 
     def mark_running(self, job_id: str, process_pid: int, process: Optional[Any] = None) -> None:
         job = self.get_job(job_id)

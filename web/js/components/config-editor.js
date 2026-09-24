@@ -189,8 +189,12 @@ class ConfigEditor extends HTMLElement {
         this.querySelector('#export-btn')?.addEventListener('click', async () => {
             const filename = prompt('Save as:', 'cedartoy.yaml');
             if (filename) {
-                await api.saveConfig(this.config, filename);
-                alert(`Saved to ${filename}`);
+                const res = await api.saveConfig(this.config, filename);
+                if (res && res.status === 'success') {
+                    alert(`Saved to ${res.path}`);
+                } else {
+                    alert(`Save failed: ${(res && res.detail) || 'unknown error'}`);
+                }
             }
         });
 

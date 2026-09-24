@@ -212,10 +212,14 @@ def run_ui_server(args):
 
         threading.Thread(target=open_browser, daemon=True).start()
 
+    host = getattr(args, "host", None) or "127.0.0.1"
     print(f"Starting CedarToy Web UI on http://localhost:{args.port}")
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print(f"WARNING: listening on {host} — the UI can read/write local files; "
+              f"only expose it on trusted networks.")
     print("Press Ctrl+C to stop")
 
-    uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="info")
+    uvicorn.run(app, host=host, port=args.port, log_level="info")
 
 def main():
     parser = argparse.ArgumentParser(description="CedarToy Renderer")
@@ -250,6 +254,8 @@ def main():
     ui_parser = subparsers.add_parser("ui", help="Start web UI server")
     ui_parser.add_argument("--port", type=int, default=8080, help="Server port")
     ui_parser.add_argument("--no-browser", action="store_true", help="Do not open browser automatically")
+    ui_parser.add_argument("--host", default="127.0.0.1",
+                           help="Interface to bind (default 127.0.0.1; use 0.0.0.0 to expose on the network)")
 
     args = parser.parse_args()
     

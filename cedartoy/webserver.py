@@ -75,7 +75,7 @@ def run_server(port: int = 8000, directory: Optional[Path] = None):
     # For now, we serve 'web' folder.
     
     print(f"Starting web server at http://localhost:{port}")
-    with socketserver.TCPServer(("", port), PreviewHandler) as httpd:
+    with socketserver.TCPServer(("127.0.0.1", port), PreviewHandler) as httpd:
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:

@@ -88,6 +88,7 @@ async def get_thumbnail(path: str):
             camera_stereo="none",
             camera_fov=90.0,
             camera_params={"tilt_deg": 0.0, "ipd": 0.064},
+            disk_streaming=False,
             multipass_graph=multipass
         )
 

@@ -12,13 +12,47 @@ router = APIRouter()
 _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.resolve()
 _ALLOWED_ROOTS: Set[Path] = {_PROJECT_ROOT}
 
+# Individual files explicitly allowed (e.g. a project's audio/bundle when
+# its folder is too broad to allow wholesale).
+_ALLOWED_FILES: Set[Path] = set()
+
+
+def is_too_broad_root(path: Path) -> bool:
+    """True for filesystem/drive roots and the user's home directory."""
+    resolved = Path(path).resolve()
+    if resolved.parent == resolved:
+        return True
+    try:
+        if resolved == Path.home().resolve():
+            return True
+    except RuntimeError:
+        pass
+    return False
+
+
 def add_allowed_root(path: Path):
-    """Add a directory to the allowlist of browsable paths"""
-    _ALLOWED_ROOTS.add(path.resolve())
+    """Add a directory to the allowlist of browsable/servable paths.
+
+    Refuses filesystem roots and the home directory, which would
+    effectively disable the allowlist.
+    """
+    resolved = Path(path).resolve()
+    if is_too_broad_root(resolved):
+        raise ValueError(f"refusing to allow overly broad root: {resolved}")
+    _ALLOWED_ROOTS.add(resolved)
+
+
+def add_allowed_file(path: Path):
+    """Allow serving one specific file."""
+    _ALLOWED_FILES.add(Path(path).resolve())
+
 
 def is_path_allowed(target_path: Path) -> bool:
-    """Check if a path is within any allowed root directory"""
+    """Check if a path is within any allowed root directory (or is an
+    explicitly allowed file)."""
     resolved = target_path.resolve()
+    if resolved in _ALLOWED_FILES:
+        return True
     for allowed_root in _ALLOWED_ROOTS:
         try:
             resolved.relative_to(allowed_root)
@@ -32,8 +66,9 @@ async def browse_directory(path: str = "."):
     """Browse filesystem for directory/file selection.
 
     Security: Only paths within the project directory or explicitly
-    allowed roots can be browsed. Use add_allowed_root() to add
-    additional paths programmatically.
+    allowed roots can be browsed. Roots are added server-side only (e.g.
+    when a project folder is loaded); there is no HTTP endpoint to widen
+    the allowlist.
     """
     try:
         target_path = Path(path).resolve()
@@ -79,6 +114,8 @@ async def browse_directory(path: str = "."):
             "items": items
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -101,15 +138,3 @@ async def get_drives():
 async def get_allowed_roots():
     """Get list of allowed root directories"""
     return {"roots": [str(p) for p in sorted(_ALLOWED_ROOTS)]}
-
-@router.post("/add-allowed-root")
-async def add_allowed_root_endpoint(path: str):
-    """Add a new allowed root directory (requires valid existing path)"""
-    target = Path(path).resolve()
-    if not target.exists():
-        raise HTTPException(status_code=404, detail="Path not found")
-    if not target.is_dir():
-        raise HTTPException(status_code=400, detail="Path must be a directory")
-
-    add_allowed_root(target)
-    return {"status": "success", "allowed_roots": [str(p) for p in sorted(_ALLOWED_ROOTS)]}
