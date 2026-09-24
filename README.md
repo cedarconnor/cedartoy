@@ -20,6 +20,10 @@ python -m cedartoy.cli ui
 ```
 
 Open <http://localhost:8080>. The UI opens on **Stage 1 — Project**.
+The server listens on 127.0.0.1 only; pass `--host 0.0.0.0` to `ui` to
+expose it on your network (it can read and write local files).
+
+Tests: `pip install -r requirements-dev.txt && python -m pytest -q`.
 
 ---
 
