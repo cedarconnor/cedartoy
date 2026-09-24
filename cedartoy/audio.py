@@ -1,3 +1,4 @@
+import math
 import numpy as np
 from pathlib import Path
 from dataclasses import dataclass
@@ -20,13 +21,26 @@ MAX_DB = -30.0
 # tau_eff = 0.8 ** (60 / fps), giving the same decay per second of audio.
 SMOOTHING_TIME_CONSTANT = 0.8
 SMOOTHING_REFERENCE_FPS = 60.0
-SMOOTHING_WARMUP_FRAMES = 32
+# Residual weight below which pre-warm-up history is ignored.
+SMOOTHING_WARMUP_EPSILON = 1e-3
 
 
 def smoothing_tau_for_fps(fps: float) -> float:
     if fps <= 0:
         return SMOOTHING_TIME_CONSTANT
     return SMOOTHING_TIME_CONSTANT ** (SMOOTHING_REFERENCE_FPS / fps)
+
+
+def smoothing_warmup_frames(fps: float) -> int:
+    """Frames of history needed so tau_eff**n drops below the epsilon.
+
+    Scales with fps: at 60 fps ~31 frames, at 240 fps ~124 frames, i.e. a
+    constant ~0.5 s of audio regardless of render rate.
+    """
+    tau = smoothing_tau_for_fps(fps)
+    if tau <= 0.0:
+        return 0
+    return int(math.ceil(math.log(SMOOTHING_WARMUP_EPSILON) / math.log(tau)))
 
 
 def fft_magnitudes(chunk: np.ndarray) -> np.ndarray:
@@ -124,9 +138,10 @@ class AudioProcessor:
 
         # Not cached (e.g. past the precomputed range): warm the smoothing up
         # over the preceding frames so the result approximates the
-        # sequential value. tau_eff**WARMUP is negligible.
+        # sequential value; the warm-up length scales with fps so the
+        # discarded history weight tau_eff**n stays below the epsilon.
         smoothed = None
-        for f in range(frame_index - SMOOTHING_WARMUP_FRAMES, frame_index):
+        for f in range(frame_index - smoothing_warmup_frames(self.fps), frame_index):
             _, smoothed = self._compute_shadertoy_texture(f, smoothed)
         tex, _ = self._compute_shadertoy_texture(frame_index, smoothed)
         return tex

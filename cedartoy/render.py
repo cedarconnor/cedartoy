@@ -116,6 +116,14 @@ def date_uniform(start_dt: datetime, time_val: float) -> Tuple[float, float, flo
     return (float(now.year), float(now.month), float(now.day), float(seconds_of_day))
 
 
+def opaque_alpha(dtype) -> float:
+    """Alpha value that image_to_float maps to 1.0 for this dtype."""
+    dtype = np.dtype(dtype)
+    if dtype.kind in ("u", "i"):
+        return np.iinfo(dtype).max
+    return 1.0
+
+
 def image_to_float(img: np.ndarray) -> np.ndarray:
     """Convert a loaded image to float32 for upload as an f4 texture.
 
@@ -658,7 +666,8 @@ class Renderer:
         if img.ndim == 2:
             img = np.stack([img] * 3, axis=-1)
         if img.shape[-1] == 3:
-            alpha = np.ones((img.shape[0], img.shape[1], 1), dtype=img.dtype)
+            alpha = np.full((img.shape[0], img.shape[1], 1), opaque_alpha(img.dtype),
+                            dtype=img.dtype)
             img = np.concatenate([img, alpha], axis=-1)
         img = np.flipud(img)
 

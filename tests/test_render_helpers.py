@@ -12,6 +12,7 @@ from cedartoy.render import (
     channel_resolution_value,
     date_uniform,
     image_to_float,
+    opaque_alpha,
     resolve_frame_end,
     sample_time,
     stitch_tiles_by_rows,
@@ -188,3 +189,12 @@ def test_stitch_paths_match_reference(w, h, tx, ty):
     rows = stitch_tiles_by_rows(load, tx, ty, tile_w, tile_h, w, h)
     np.testing.assert_array_equal(mem, expected)
     np.testing.assert_array_equal(rows, mem)
+
+
+@pytest.mark.parametrize("dtype", [np.uint8, np.uint16])
+def test_opaque_alpha_maps_to_one(dtype):
+    rgb = np.zeros((2, 2, 3), dtype=dtype)
+    alpha = np.full((2, 2, 1), opaque_alpha(dtype), dtype=dtype)
+    out = image_to_float(np.concatenate([rgb, alpha], axis=-1))
+    assert np.all(out[..., 3] == 1.0)
+    assert opaque_alpha(np.float32) == 1.0

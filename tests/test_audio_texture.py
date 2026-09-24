@@ -9,6 +9,7 @@ from cedartoy.audio import (
     magnitudes_to_unit,
     smooth_magnitudes,
     smoothing_tau_for_fps,
+    smoothing_warmup_frames,
 )
 
 SR = 44100
@@ -81,3 +82,20 @@ def test_helpers():
     np.testing.assert_allclose(magnitudes_to_unit(m), [0.0, 0.5, 1.0], atol=1e-6)
     np.testing.assert_allclose(
         smooth_magnitudes(np.ones(3), np.zeros(3), 0.8), np.full(3, 0.2))
+
+
+@pytest.mark.parametrize("fps", [24.0, 60.0, 240.0])
+def test_warmup_scales_with_fps(fps):
+    n = smoothing_warmup_frames(fps)
+    assert smoothing_tau_for_fps(fps) ** n < 1e-3
+    # Constant ~0.5 s of audio history regardless of render rate.
+    assert 0.3 < n / fps < 0.7
+
+
+def test_uncached_frame_matches_sequential_at_high_fps(tmp_path):
+    sig = np.concatenate([_tone(0.5, seconds=0.5), np.zeros(SR)])
+    ap = _processor(tmp_path, sig, fps=240.0)
+    frame = int(0.5 * 240) + 40  # 40 frames into the decay tail
+    cached = ap.get_shadertoy_texture(frame).copy()
+    del ap._precomputed_textures[frame]
+    np.testing.assert_allclose(ap.get_shadertoy_texture(frame), cached, atol=1e-3)
