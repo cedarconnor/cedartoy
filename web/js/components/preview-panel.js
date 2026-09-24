@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { ShaderRenderer } from '../webgl/renderer.js?v=4';
+import { ShaderRenderer } from '../webgl/renderer.js?v=5';
 import { composeRow1, composeUniforms, effectiveSettings,
     applySettingsSeries, composeRow0FromValues }
     from '../webgl/cue-compose.js';
@@ -48,8 +48,10 @@ class PreviewPanel extends HTMLElement {
             this._timeline = null;
             if (!audio) return;
             try {
+                const ce = document.querySelector('config-editor');
+                const avOff = (ce && ce.config && +ce.config.av_offset_ms) || 0;
                 const r = await fetch('/api/reactivity/track-timeline?audio='
-                    + encodeURIComponent(audio));
+                    + encodeURIComponent(audio) + '&av_offset_ms=' + avOff);
                 if (r.ok) {
                     this._timeline = await r.json();
                     this._timelineFps = this._timeline.fps || 24.0;
