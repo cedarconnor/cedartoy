@@ -34,6 +34,10 @@ export class ShaderRenderer {
         // shaderParamValues so setShaderParameters() can override per-frame.
         this.shaderParams = [];
         this.shaderParamValues = {};
+        // Modulation-matrix values ({param: value}) for the current transport
+        // time, set by preview-panel from /api/modulation/series. They
+        // override shaderParamValues at bind time without replacing them.
+        this.paramOverrides = null;
 
         // Mouse tracking for iMouse uniform
         this.mouseX = 0;
@@ -484,10 +488,12 @@ vec3 cameraDirLL180(vec2 uv, float tiltDeg, mat3 camBasis) {
         // `iTime * pulse_speed`) from freezing when the param isn't otherwise
         // set. Headless render binds the same values via the job's
         // shader_parameters dict; preview now matches.
+        const ov = this.paramOverrides;
         for (const p of this.shaderParams) {
             const loc = this.uniforms[p.name];
             if (loc === null) continue;
-            const v = this.shaderParamValues[p.name];
+            const v = (ov && p.type === 'float' && ov[p.name] !== undefined)
+                ? ov[p.name] : this.shaderParamValues[p.name];
             if (p.type === 'int') gl.uniform1i(loc, v | 0);
             else gl.uniform1f(loc, +v);
         }

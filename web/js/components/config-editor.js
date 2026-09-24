@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import './modulation-panel.js?v=1';
 
 class ConfigEditor extends HTMLElement {
     constructor() {
@@ -68,10 +69,17 @@ class ConfigEditor extends HTMLElement {
                                 title="Copy a Claude-ready prompt that retrofits MusiCue reactivity onto this shader.">
                             Make this shader reactive ▸
                         </button>
+                        <button class="btn btn-secondary" id="knobs-prompt-btn"
+                                title="Copy a Claude-ready prompt that exposes this shader's expressive constants as @params (with suggested @mod routes) for the modulation matrix — no audio code.">
+                            Expose knobs ▸
+                        </button>
                     </div>
 
                     <!-- Shader Parameters Section (Dynamic) -->
                     <div id="shader-params-container"></div>
+
+                    <!-- Modulation matrix: routes music into float @params -->
+                    <modulation-panel></modulation-panel>
 
                     <div class="form-group">
                         <label class="form-label">Output Directory</label>
@@ -202,6 +210,11 @@ class ConfigEditor extends HTMLElement {
         this.querySelector('#reactivity-prompt-btn')?.addEventListener('click', async () => {
             await this._onReactivityPromptClick();
         });
+
+        // "Expose knobs ▸" button.
+        this.querySelector('#knobs-prompt-btn')?.addEventListener('click', async () => {
+            await this._onKnobsPromptClick();
+        });
     }
 
     async _updateReactivityStatus(shaderPath) {
@@ -230,17 +243,32 @@ class ConfigEditor extends HTMLElement {
         }
     }
 
-    async _onReactivityPromptClick() {
-        if (!this._reactivityPrompt) {
-            // Try to refresh in case the shader changed but status hadn't loaded yet.
-            await this._updateReactivityStatus(this.config.shader);
-            if (!this._reactivityPrompt) {
-                alert('Pick a shader first.');
-                return;
-            }
+    async _onKnobsPromptClick() {
+        if (!this.config.shader) {
+            alert('Pick a shader first.');
+            return;
         }
+        let prompt;
         try {
-            await navigator.clipboard.writeText(this._reactivityPrompt);
+            let url = `/api/reactivity/knobs-prompt?shader=${encodeURIComponent(this.config.shader)}`;
+            if (this.config.audio_path) url += `&audio=${encodeURIComponent(this.config.audio_path)}`;
+            const r = await fetch(url);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            prompt = (await r.json()).prompt;
+        } catch (e) {
+            alert(`Expose-knobs prompt failed: ${e.message}`);
+            return;
+        }
+        await this._copyPrompt(prompt, 'knobs');
+    }
+
+    /** Copy a prompt and tell the paste-back drawer which kind it was. */
+    async _copyPrompt(prompt, kind) {
+        window.cedartoy = window.cedartoy || {};
+        window.cedartoy.promptKind = kind;
+        document.dispatchEvent(new CustomEvent('prompt-kind-change', { detail: { kind } }));
+        try {
+            await navigator.clipboard.writeText(prompt);
             const status = this.querySelector('#reactivity-status');
             const note = document.createElement('span');
             note.textContent = ' ✔ copied — paste into Claude';
@@ -250,10 +278,21 @@ class ConfigEditor extends HTMLElement {
             setTimeout(() => note.remove(), 4000);
         } catch (e) {
             // Clipboard API unavailable (e.g. plain http). Fall back to a blob URL.
-            const blob = new Blob([this._reactivityPrompt], { type: 'text/markdown' });
-            const url = URL.createObjectURL(blob);
-            window.open(url, '_blank');
+            const blob = new Blob([prompt], { type: 'text/markdown' });
+            window.open(URL.createObjectURL(blob), '_blank');
         }
+    }
+
+    async _onReactivityPromptClick() {
+        if (!this._reactivityPrompt) {
+            // Try to refresh in case the shader changed but status hadn't loaded yet.
+            await this._updateReactivityStatus(this.config.shader);
+            if (!this._reactivityPrompt) {
+                alert('Pick a shader first.');
+                return;
+            }
+        }
+        await this._copyPrompt(this._reactivityPrompt, 'reactive');
     }
 
     saveToLocalStorage() {
