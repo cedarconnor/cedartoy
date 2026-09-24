@@ -85,6 +85,8 @@ OPTIONS.append(Option("bundle_mode", "Bundle Mode", "choice", "auto",
     help_text="auto=cued when bundle present; raw=ignore; cued=synthesized; blend=mix"))
 OPTIONS.append(Option("bundle_blend", "Bundle Blend (0-1)", "float", 0.5,
     help_text="Mix weight for cued texture when bundle_mode='blend'"))
+OPTIONS.append(Option("av_offset_ms", "A/V Offset (ms)", "float", 0.0,
+    help_text="Shift all MusiCue bundle signals in time. Positive = visuals later."))
 
 # --- Camera ---
 OPTIONS.append(Option("camera_mode", "Camera Mode", "choice", "2d", choices=["2d", "equirect", "ll180"]))

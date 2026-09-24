@@ -396,19 +396,20 @@ class Renderer:
                 override_path=getattr(job, "bundle_path", None),
             )
             if result.bundle is not None:
-                self.bundle_eval = BundleEvaluator(result.bundle, fps=job.fps)
+                self.bundle_eval = BundleEvaluator(
+                    result.bundle, fps=job.fps,
+                    av_offset_ms=getattr(job, "av_offset_ms", 0.0) or 0.0)
                 self.spectrum_synth = MusicalSpectrumSynth()
                 # Precompute per-track effective series (settings + causal
                 # smoothing) over 0..frame_end. Smoothing is stateful, so it
                 # must run from frame 0; preview mirrors this exactly.
-                from .musicue import BAND_TRACKS, _BAND_TRACK_SOURCE, apply_settings_series
+                from .musicue import BAND_TRACKS, apply_settings_series, band_raw_value
                 n = self._band_series_length()
                 raw_series = {tid: [] for tid in BAND_TRACKS}
                 for fi in range(n):
                     ef = self.bundle_eval.evaluate(fi)
                     for tid in BAND_TRACKS:
-                        field, key = _BAND_TRACK_SOURCE[tid]
-                        raw_series[tid].append(float(getattr(ef, field).get(key, 0.0)))
+                        raw_series[tid].append(band_raw_value(ef, tid))
                 self._eff_band_series = {
                     tid: apply_settings_series(raw_series[tid], self.track_settings.get(tid))
                     for tid in BAND_TRACKS
@@ -1134,20 +1135,22 @@ class Renderer:
         ch_time = [0.0, 0.0, 0.0, 0.0]
         ch_res = [(0.0, 0.0, 0.0)] * 4
 
-        eval_frame = None
         if self.audio:
             uni['iSampleRate'] = float(self.audio.meta.sample_rate)
             if self.job.audio_mode in ("shadertoy", "both"):
                 raw_aud = self.audio.get_shadertoy_texture(frame_idx)
                 if self.bundle_eval is not None and self.spectrum_synth is not None:
-                    eval_frame = self.bundle_eval.evaluate(frame_idx)
+                    # iChannel0 stays per-frame: its band series is
+                    # precomputed with stateful smoothing and shared with
+                    # the preview, so it must be indexed by frame.
+                    tex_frame = self.bundle_eval.evaluate(frame_idx)
                     from .musicue import BAND_TRACKS
                     idx = max(0, min(frame_idx, self._eff_series_len - 1))
                     band_values = {tid: self._eff_band_series[tid][idx]
                                    for tid in BAND_TRACKS}
                     cued_aud = self.spectrum_synth.synthesize_effective(
-                        band_values, eval_frame.section_energy,
-                        eval_frame.beat_phase, eval_frame.global_energy)
+                        band_values, tex_frame.section_energy,
+                        tex_frame.beat_phase, tex_frame.global_energy)
                     aud_data = _mix_audio_textures(
                         raw_aud, cued_aud, self.bundle_mode, self.bundle_blend,
                     )
@@ -1159,9 +1162,13 @@ class Renderer:
         else:
             uni['iSampleRate'] = 0.0
 
-        # Built-in cuesheet/bundle uniforms (Phase 1), with per-track mutes applied.
-        from .musicue import masked_builtin_uniforms
-        uni.update(masked_builtin_uniforms(eval_frame, self.track_settings))
+        # Scalar bundle uniforms (Phase-1 six + musical signals), with
+        # per-track settings applied. Evaluated at this temporal sample's
+        # time so motion-blur samples see the right beat/envelope values.
+        from .musicue import bundle_uniforms
+        eval_frame = (self.bundle_eval.evaluate_at(time_val)
+                      if self.bundle_eval is not None else None)
+        uni.update(bundle_uniforms(eval_frame, self.track_settings, time_val))
 
         if self.history_tex:
             self.history_tex.use(location=4)

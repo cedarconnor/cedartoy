@@ -192,6 +192,7 @@ def config_to_job(cfg: dict) -> RenderJob:
         bundle_path=Path(cfg["bundle_path"]) if cfg.get("bundle_path") else None,
         bundle_mode=cfg.get("bundle_mode", "auto"),
         bundle_blend=cfg.get("bundle_blend", 0.5),
+        av_offset_ms=float(cfg.get("av_offset_ms", 0.0) or 0.0),
         track_settings=cfg.get("track_settings", {}),
     )
 

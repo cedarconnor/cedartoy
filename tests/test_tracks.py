@@ -12,7 +12,7 @@ def test_track_id_inventory():
     assert BAND_TRACKS["drums.other"] == "mid_hi"
     assert BAND_TRACKS["stem.vocals"] == "high"
     assert BAND_TRACKS["stem.other"] == "high"
-    assert BAND_TRACKS["stem.bass"] == "high"
+    assert BAND_TRACKS["stem.bass"] == "low"      # bass sits with the kick
     assert UNIFORM_TRACKS == {"tempo", "sections", "energy"}
     # ALL = band + uniform, no duplicates
     assert set(ALL_TRACK_IDS) == set(BAND_TRACKS) | UNIFORM_TRACKS
@@ -63,11 +63,14 @@ def test_band_contributions_sum_to_synth_output():
 def test_muting_kick_removes_low_band():
     synth = MusicalSpectrumSynth()
     frame = _frame()
-    muted = synth.synthesize(frame, settings={"drums.kick": {"mute": True}})
-    # low band (bins 0:32) must be only the section_energy floor (0.04), no kick
-    assert muted[0, 16] <= 0.1 + 1e-6
     full = synth.synthesize(frame, settings=None)
+    muted = synth.synthesize(frame, settings={"drums.kick": {"mute": True}})
     assert full[0, 16] > muted[0, 16]   # kick contributed before muting
+    # low band (bins 0:32) holds kick + bass; with both muted only the
+    # section_energy floor (0.04) remains.
+    both = synth.synthesize(frame, settings={"drums.kick": {"mute": True},
+                                             "stem.bass": {"mute": True}})
+    assert both[0, 16] <= 0.1 + 1e-6
 
 
 def test_gain_boosts_band():
@@ -257,10 +260,10 @@ def test_synthesize_effective_matches_synthesize_for_same_values():
                       midi_energy={"vocals": 0.7})
     settings = {"drums.kick": {"gain": 0.5}}
     ref = synth.synthesize(frame, settings)
+    from cedartoy.musicue import band_raw_value
     band_values = {}
     for tid in BAND_TRACKS:
-        field, key = _BAND_TRACK_SOURCE[tid]
-        raw = getattr(frame, field).get(key, 0.0)
+        raw = band_raw_value(frame, tid)
         band_values[tid] = apply_setting(raw, settings.get(tid))
     out = synth.synthesize_effective(band_values, frame.section_energy,
                                      frame.beat_phase, frame.global_energy)

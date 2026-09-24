@@ -80,6 +80,7 @@ class RenderJob:
     bundle_path: Optional[Path] = None
     bundle_mode: str = "auto"
     bundle_blend: float = 0.5
+    av_offset_ms: float = 0.0          # + = visuals later (bundle eval time = t - offset)
 
     # Writer tuning
     png_compress_level: int = 1       # PIL deflate level (0=none, 1=fastest, 9=smallest)

@@ -59,6 +59,9 @@ class CedarToyConfig(BaseModel):
     bundle_path: Optional[Path] = None
     bundle_mode: BundleMode = "auto"
     bundle_blend: float = 0.5
+    # Global audio/visual offset for all MusiCue bundle evaluation, in ms.
+    # Positive = visuals land later than the music analysis says.
+    av_offset_ms: float = 0.0
     camera_mode: CameraMode = "2d"
     camera_stereo: StereoMode = "none"
     camera_fov: float = 90.0

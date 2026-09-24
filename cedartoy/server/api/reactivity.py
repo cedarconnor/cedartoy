@@ -98,7 +98,7 @@ def fixit_prompt(body: FixitRequest) -> dict:
 
 
 @router.get("/track-timeline")
-def track_timeline(audio: str, fps: float = 24.0) -> dict:
+def track_timeline(audio: str, fps: float = 24.0, av_offset_ms: float = 0.0) -> dict:
     """Per-track timeline (lane-draw data + health) for the given audio file."""
     audio_path = Path(audio)
     if not audio_path.exists():
@@ -107,4 +107,4 @@ def track_timeline(audio: str, fps: float = 24.0) -> dict:
     if result.bundle is None:
         raise HTTPException(status_code=404,
                             detail=f"no MusiCue bundle for {audio}")
-    return build_track_timeline(result.bundle, fps=fps)
+    return build_track_timeline(result.bundle, fps=fps, av_offset_ms=av_offset_ms)
