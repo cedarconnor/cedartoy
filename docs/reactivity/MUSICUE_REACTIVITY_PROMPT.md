@@ -37,7 +37,9 @@ knobs* and wire them to the music — not to apply a checklist.
    `mainImage`. No `Buffer A` / `Buffer B` simulations.
 
 6. **Use the bundle uniforms and `iChannel0` frequency bands** listed
-   below. Do not invent new uniforms.
+   below. Do not invent new uniforms. Only react to data the song
+   actually has (see the song data summary appended below, when present):
+   uniforms for absent data read 0.
 
 ## Inputs available
 
@@ -45,10 +47,10 @@ knobs* and wire them to the music — not to apply a checklist.
 uniform float     iTime;
 uniform vec3      iResolution;
 uniform sampler2D iChannel0;   // 2x512 musical spectrum texture
-                               //   row 0.25 (frequency): bins 0–32 kick,
+                               //   row 0.25 (frequency): bins 0–32 kick+bass,
                                //                         32–96 snare+tom,
                                //                         96–256 hat+cymbal,
-                               //                         256–512 melodic
+                               //                         256–512 vocals+other
                                //   row 0.75 (waveform):  tempo-locked heartbeat
 
 uniform float iBpm;             // current BPM
@@ -60,7 +62,34 @@ uniform int   iSectionId;       // stable per-label id (verse=N, chorus=M, ...).
                                 //   change to happen on verse/chorus/bridge
                                 //   boundaries.
 uniform float iEnergy;          // [0,1] global energy at this moment
+
+// Musical-structure uniforms (bundle schema 1.3; older bundles degrade:
+// missing controls/stems read 0, clocks come from beats/bpm).
+uniform float iBeatClock;         // continuous beat count from the real beat grid
+                                  //   (monotonic, phase-locked; use for smooth motion)
+uniform float iBarPhase;          // [0,1) position within the bar (from downbeats)
+uniform float iPhrasePhase;       // [0,1) position within the phrase (else 4-bar groups)
+uniform float iSectionProgress;   // [0,1] position within the current section
+uniform float iTimeToNextSection; // seconds until the next section (1000 if none)
+uniform float iBuild;             // [0,1] anticipation ramp into a drop; 0 at the drop
+uniform float iKick;              // [0,1] kick envelope (decays ~10% in half a beat)
+uniform float iSnare;             // [0,1] snare envelope
+uniform float iHat;               // [0,1] hi-hat envelope
+uniform float iBass;              // [0,1] bass stem loudness (0 without stems)
+uniform float iVocals;            // [0,1] vocal stem loudness
+uniform float iDrums;             // [0,1] drum stem loudness
+uniform float iOther;             // [0,1] other stem loudness
+uniform float iBrightness;        // [0,1] spectral brightness of the mix
+uniform float iEnergyFast;        // [0,1] short-window loudness (fallback iEnergy)
+uniform float iMusicTime;         // seconds; iTime that runs faster when loud,
+                                  //   slower when quiet (mean rate 1). Use it
+                                  //   instead of iTime for flow speed.
 ```
+
+Declare only the uniforms you use. For smooth tempo-locked motion use
+`iBeatClock` / `iBarPhase` (never `float(iBar) + iBeat`); to make speed
+follow the music, replace `iTime` with `iMusicTime` rather than
+multiplying `iTime` by an audio signal.
 
 ## Cookbook (vocabulary, not a checklist)
 
@@ -69,7 +98,7 @@ Read them for ideas — copy one, adapt one, combine two, or invent
 something better that fits this shader. If you use a cookbook idiom,
 keep a `// === <name> ===` comment header so the lineage is traceable.
 
-Add `// cookbook_version: 2` near the top of the modified shader.
+Add `// cookbook_version: 3` near the top of the modified shader.
 
 <paste the full contents of REACTIVITY_COOKBOOK.md here verbatim>
 

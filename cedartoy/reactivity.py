@@ -10,9 +10,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from .musicue import MUSICAL_UNIFORMS
+
 BUNDLE_UNIFORMS = (
     "iBpm", "iBeat", "iBar", "iSectionEnergy", "iSectionId", "iEnergy", "iChannel0",
-)
+) + tuple(MUSICAL_UNIFORMS)
 
 _LINE_COMMENT_RE = re.compile(r"//[^\n]*")
 _BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)

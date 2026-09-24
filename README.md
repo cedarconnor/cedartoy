@@ -174,7 +174,7 @@ musicue export-bundle my_music.mp3
 
 ### Bundle-aware shader uniforms
 
-CedarToy binds six uniforms whenever a bundle is loaded. Declaring any of them in your GLSL opts the shader into bundle-aware reactivity:
+CedarToy binds these uniforms whenever a bundle is loaded. Declaring any of them in your GLSL opts the shader into bundle-aware reactivity:
 
 ```glsl
 uniform float iBpm;            // current BPM
@@ -183,9 +183,38 @@ uniform int   iBar;            // 0-indexed bar number
 uniform float iSectionEnergy;  // [0,1] energy rank of current section
 uniform int   iSectionId;      // stable per-label section id (verse=0, chorus=1, …)
 uniform float iEnergy;         // [0,1] global energy at this moment
+
+// Musical-structure uniforms (bundle schema 1.3; older bundles degrade:
+// missing controls/stems read 0, clocks come from beats/bpm).
+uniform float iBeatClock;         // continuous beat count from the real beat grid
+                                  //   (monotonic, phase-locked; use for smooth motion)
+uniform float iBarPhase;          // [0,1) position within the bar (from downbeats)
+uniform float iPhrasePhase;       // [0,1) position within the phrase (else 4-bar groups)
+uniform float iSectionProgress;   // [0,1] position within the current section
+uniform float iTimeToNextSection; // seconds until the next section (1000 if none)
+uniform float iBuild;             // [0,1] anticipation ramp into a drop; 0 at the drop
+uniform float iKick;              // [0,1] kick envelope (decays ~10% in half a beat)
+uniform float iSnare;             // [0,1] snare envelope
+uniform float iHat;               // [0,1] hi-hat envelope
+uniform float iBass;              // [0,1] bass stem loudness (0 without stems)
+uniform float iVocals;            // [0,1] vocal stem loudness
+uniform float iDrums;             // [0,1] drum stem loudness
+uniform float iOther;             // [0,1] other stem loudness
+uniform float iBrightness;        // [0,1] spectral brightness of the mix
+uniform float iEnergyFast;        // [0,1] short-window loudness (fallback iEnergy)
+uniform float iMusicTime;         // seconds; iTime that runs faster when loud,
+                                  //   slower when quiet (mean rate 1). Use it
+                                  //   instead of iTime for flow speed.
 ```
 
-These six uniforms — plus the bundle-synthesized `iChannel0` texture — are exactly what Validate mode lets you mute, solo, and calibrate per track.
+Scalar uniforms are evaluated at each temporal sample's time, so motion
+blur sees the right values. `av_offset_ms` (config / UI) shifts every
+bundle signal in time; positive = visuals later. Without a bundle all of
+them are 0 except `iTimeToNextSection` (1000) and `iMusicTime` (= `iTime`).
+See `shaders/musical_demo.glsl` for a showcase and
+`docs/reactivity/REACTIVITY_COOKBOOK.md` for idioms.
+
+These uniforms — plus the bundle-synthesized `iChannel0` texture — are exactly what Validate mode lets you mute, solo, and calibrate per track.
 
 Shaders that don't declare these still work — they see the bundle-driven `iChannel0` texture and behave more musically without any code change.
 
