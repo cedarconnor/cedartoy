@@ -60,6 +60,19 @@ camera_stereo: "none"  # "none", "sbs" (Side-by-Side), "tb" (Top-Bottom)
 # Audio
 audio_path: "music.wav"
 audio_mode: "both"     # "shadertoy", "history", or "both"
+
+# Shader knobs (@param) and the modulation matrix
+shader_parameters:     # base values; missing params use their @param default
+  warp_amount: 0.3
+modulation_routes:     # omit to use the shader's `// @mod` defaults; [] = none
+  - target: warp_amount    # a float @param
+    source: iKick          # see README "Modulation matrix" for the list
+    depth: 0.5             # param units, may be negative
+    curve: ease_out        # linear | ease_in | ease_out | smoothstep | pow2 | sqrt
+    attack_beats: 0.0      # follower attack/release in beats (0 = instant)
+    release_beats: 0.5
+    mode: add              # add (clamped to @param range) | integrate (phase, unclamped)
+    enabled: true
 ```
 
 ---

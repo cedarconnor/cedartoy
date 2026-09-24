@@ -287,7 +287,25 @@ uniform float audio_strength;
 uniform float pulse_speed;
 ```
 
-CedarToy parses these and renders sliders in the Web UI under the shader-parameters section.
+CedarToy parses these (anywhere in the file) and renders sliders in the Web UI under the shader-parameters section. Params missing from `shader_parameters` render at their declared default.
+
+### Modulation matrix
+
+Make any shader musical without rewriting it: a shader only exposes float `@param` knobs, and CedarToy routes musical signals into them. Stage 2 → **Modulation** lists every float `@param` with a base slider, its routes (source, depth, curve, attack/release in **beats**, mode, enable, ✕), **+ route**, and a live meter of the value at the playhead. Routes are saved in the render config as `modulation_routes`, and the preview binds exactly the values the render uses (computed by `cedartoy/modulation.py`).
+
+- **Sources** (0..1, after track mutes/gain/threshold): `iEnergy`, `iEnergyFast`, `iSectionEnergy`, `iBuild`, `iKick`, `iSnare`, `iHat`, `iBass`, `iVocals`, `iDrums`, `iOther`, `iBrightness`, `iBarPhase`, `iPhrasePhase`, `iSectionProgress`, `iBeat`, plus `beat_pulse` / `downbeat_pulse`.
+- **Shaping**: source → envelope follower (attack/release × local beat period) → curve (`linear`, `ease_in`, `ease_out`, `smoothstep`, `pow2`, `sqrt`) → × depth.
+- **`add`**: `param = base + Σ depth·shaped`, clamped to the `@param` min/max. **`integrate`**: adds `depth · ∫shaped dt` (seconds) and is *not* clamped. Use it for phase/offset knobs (rotation angle, scroll offset) so their speed follows the music without jitter.
+
+Shaders can declare default routes next to their params (see `shaders/auroras.glsl`, `shaders/musical_demo.glsl`):
+
+```glsl
+// @param warp_amount float 0.2 0.0 1.0 "Warp"
+// @mod warp_amount <- iKick depth=0.5 release=0.5 curve=ease_out
+// @mod swirl_phase <- iEnergy depth=1.5 mode=integrate
+```
+
+A `modulation_routes` list in the config (even `[]`) replaces the `@mod` defaults; leave the key out to use them. To add knobs to an existing shader, click **Expose knobs ▸** next to *Make this shader reactive ▸*. It copies a Claude prompt that turns the shader's most expressive constants into `@param`s (look unchanged at defaults) and suggests `@mod` routes from the loaded song's data. Paste the reply into the same drawer; **Apply** writes `<shader>_knobs.glsl`.
 
 ---
 
