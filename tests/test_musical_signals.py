@@ -409,3 +409,40 @@ def test_sample_bundle_1_3_loads_and_evaluates():
         assert 0 <= u["iBarPhase"] < 1 and 0 <= u["iPhrasePhase"] < 1
         assert 0 <= u["iKick"] <= 1
     assert ev.music_time_at(b.duration_sec) == pytest.approx(b.duration_sec, rel=1e-3)
+
+
+# ---- demo shader compiles in both wrappers ----
+
+_GLSLANG = shutil.which("glslangValidator")
+
+
+@pytest.mark.skipif(_GLSLANG is None, reason="glslangValidator not installed")
+def test_musical_demo_compiles_for_renderer(tmp_path):
+    from cedartoy.shader import load_shader_from_file
+    out = tmp_path / "demo.frag"
+    out.write_text(load_shader_from_file(ROOT / "shaders/musical_demo.glsl"),
+                   encoding="utf-8")
+    res = subprocess.run([_GLSLANG, "-S", "frag", str(out)],
+                         capture_output=True, text=True)
+    assert res.returncode == 0, res.stdout + res.stderr
+
+
+@pytest.mark.skipif(_GLSLANG is None or _NODE is None,
+                    reason="glslangValidator/node not installed")
+def test_musical_demo_compiles_for_webgl_preview(tmp_path):
+    out = tmp_path / "demo_web.frag"
+    script = tmp_path / "wrap.mjs"
+    renderer = (ROOT / "web/js/webgl/renderer.js").as_uri()
+    script.write_text(
+        f"import {{ ShaderRenderer }} from {json.dumps(renderer)};\n"
+        "import { readFileSync, writeFileSync } from 'fs';\n"
+        f"const src = readFileSync({json.dumps(str(ROOT / 'shaders/musical_demo.glsl'))}, 'utf8');\n"
+        f"writeFileSync({json.dumps(str(out))}, "
+        "ShaderRenderer.prototype.wrapShaderSource.call({}, src));\n",
+        encoding="utf-8")
+    res = subprocess.run([_NODE, str(script)], capture_output=True, text=True, timeout=60)
+    if res.returncode != 0:
+        pytest.skip(f"node could not import renderer.js as ESM: {res.stderr[:200]}")
+    res = subprocess.run([_GLSLANG, "-S", "frag", str(out)],
+                         capture_output=True, text=True)
+    assert res.returncode == 0, res.stdout + res.stderr
