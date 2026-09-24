@@ -2,19 +2,23 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from cedartoy.reactivity import (
     BUNDLE_UNIFORMS,
+    build_expose_knobs_prompt,
     build_fixit_prompt,
     build_reactivity_prompt,
     parse_declared_uniforms,
 )
 from cedartoy.musicue import (
     build_track_timeline, load_for_audio, bundle_health, format_bundle_health,
+    discover_bundle_path, load_bundle,
 )
+from cedartoy.server.api.files import is_path_allowed
 
 router = APIRouter()
 
@@ -22,6 +26,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _SHADERS_DIR = _REPO_ROOT / "shaders"
 _PROMPT_PATH = _REPO_ROOT / "docs" / "reactivity" / "MUSICUE_REACTIVITY_PROMPT.md"
 _COOKBOOK_PATH = _REPO_ROOT / "docs" / "reactivity" / "REACTIVITY_COOKBOOK.md"
+_KNOBS_PROMPT_PATH = _REPO_ROOT / "docs" / "reactivity" / "EXPOSE_KNOBS_PROMPT.md"
 
 
 @router.get("/prompt")
@@ -71,10 +76,56 @@ def reactivity_prompt(shader: str, audio: str | None = None) -> dict:
     }
 
 
+def _shader_file(shader: str) -> Path:
+    """Resolve 'shaders/foo.glsl' or 'foo.glsl' inside the shaders dir."""
+    rel = shader
+    for prefix in ("shaders/", "shaders\\"):
+        if rel.startswith(prefix):
+            rel = rel[len(prefix):]
+            break
+    src_path = (_SHADERS_DIR / rel).resolve()
+    try:
+        src_path.relative_to(_SHADERS_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="shader outside shaders directory")
+    if not src_path.exists() or not src_path.is_file():
+        raise HTTPException(status_code=404, detail=f"shader not found: {shader}")
+    return src_path
+
+
+def _allowed_bundle_summary(audio: str | None) -> str | None:
+    """Bundle health for an audio file inside a loaded project (else None)."""
+    if not audio:
+        return None
+    audio_path = Path(audio).resolve()
+    if not is_path_allowed(audio_path) or not audio_path.is_file():
+        return None
+    bundle_path = discover_bundle_path(audio_path)
+    if bundle_path is None:
+        return None
+    try:
+        return format_bundle_health(bundle_health(load_bundle(bundle_path)))
+    except ValueError:
+        return None
+
+
+@router.get("/knobs-prompt")
+def knobs_prompt(shader: str, audio: str | None = None) -> dict:
+    """"Expose knobs" prompt: constants -> @params + suggested @mod routes."""
+    src = _shader_file(shader).read_text(encoding="utf-8")
+    prompt = build_expose_knobs_prompt(
+        shader_src=src,
+        template_path=_KNOBS_PROMPT_PATH,
+        bundle_summary=_allowed_bundle_summary(audio),
+    )
+    return {"shader": shader, "prompt": prompt}
+
+
 class FixitRequest(BaseModel):
     base: str
     broken_glsl: str
     gl_log: str
+    kind: Literal["reactive", "knobs"] = "reactive"
 
 
 @router.post("/fixit-prompt")
@@ -88,11 +139,18 @@ def fixit_prompt(body: FixitRequest) -> dict:
     if not candidate.exists():
         raise HTTPException(status_code=404, detail=f"base shader not found: {body.base}")
 
+    if body.kind == "knobs":
+        guidance = build_expose_knobs_prompt(
+            shader_src="(see the original shader above)",
+            template_path=_KNOBS_PROMPT_PATH)
+    else:
+        guidance = _COOKBOOK_PATH.read_text(encoding="utf-8")
     prompt = build_fixit_prompt(
         broken_glsl=body.broken_glsl,
         gl_log=body.gl_log,
         original_glsl=candidate.read_text(encoding="utf-8"),
-        cookbook=_COOKBOOK_PATH.read_text(encoding="utf-8"),
+        cookbook=guidance,
+        kind=body.kind,
     )
     return {"prompt": prompt}
 

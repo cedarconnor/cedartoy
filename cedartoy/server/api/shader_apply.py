@@ -24,6 +24,9 @@ class ApplyRequest(BaseModel):
     base: str = Field(..., description="Original shader filename (e.g. 'phantom_mode.glsl').")
     glsl: str = Field(..., description="Full GLSL source to write.")
     mode: Literal["sibling", "overwrite"] = "sibling"
+    # Sibling name suffix: <stem>_reactive.glsl (Make reactive) or
+    # <stem>_knobs.glsl (Expose knobs).
+    kind: Literal["reactive", "knobs"] = "reactive"
 
 
 def _atomic_write(target: Path, content: str) -> None:
@@ -79,7 +82,7 @@ def shader_apply(body: ApplyRequest) -> dict:
         raise HTTPException(status_code=404, detail=f"base shader not found: {body.base}")
 
     if body.mode == "sibling":
-        target = candidate.with_name(f"{candidate.stem}_reactive.glsl")
+        target = candidate.with_name(f"{candidate.stem}_{body.kind}.glsl")
     else:
         target = candidate
 
