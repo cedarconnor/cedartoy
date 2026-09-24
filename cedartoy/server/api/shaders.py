@@ -8,6 +8,8 @@ import io
 import tempfile
 import shutil
 
+from cedartoy.shader import parse_params
+
 router = APIRouter()
 
 SHADERS_DIR = Path(__file__).parent.parent.parent.parent / "shaders"
@@ -196,47 +198,27 @@ async def save_shader(data: dict):
     return {"status": "success"}
 
 def _parse_shader_metadata(shader_path: Path) -> Dict:
-    """Parse metadata from shader header comments"""
+    """Parse metadata from shader header comments (``// Key: value``) plus
+    ``@param`` declarations anywhere in the source (shared parser)."""
     metadata = {}
 
     try:
-        with open(shader_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                if not line.startswith("//"):
-                    break
-
-                # Parse patterns like: // Name: My Shader
-                match = re.match(r'^//\s*(\w+):\s*(.+)$', line)
-                if match:
-                    key = match.group(1).lower()
-                    value = match.group(2).strip()
-                    metadata[key] = value
-                
-                # Parse params: // @param name type default min max label
-                # Example: // @param speed float 1.0 0.0 5.0 "Speed Factor"
-                param_match = re.match(r'^//\s*@param\s+(\w+)\s+(\w+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+(.+)$', line)
-                if param_match:
-                    if "parameters" not in metadata:
-                        metadata["parameters"] = []
-                    
-                    p_name, p_type, p_def, p_min, p_max, p_label = param_match.groups()
-                    
-                    # Strip quotes from label if present
-                    if p_label.startswith('"') and p_label.endswith('"'):
-                        p_label = p_label[1:-1]
-                        
-                    metadata["parameters"].append({
-                        "name": p_name,
-                        "type": p_type,
-                        "default": float(p_def) if p_type == "float" else int(p_def),
-                        "min": float(p_min) if p_type == "float" else int(p_min),
-                        "max": float(p_max) if p_type == "float" else int(p_max),
-                        "label": p_label
-                    })
+        source = shader_path.read_text(encoding="utf-8")
     except Exception:
-        pass
+        return metadata
 
+    for line in source.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if not line.startswith("//"):
+            break
+        # Parse patterns like: // Name: My Shader
+        match = re.match(r'^//\s*(\w+):\s*(.+)$', line)
+        if match:
+            metadata[match.group(1).lower()] = match.group(2).strip()
+
+    params = parse_params(source)
+    if params:
+        metadata["parameters"] = params
     return metadata

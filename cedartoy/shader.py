@@ -1,6 +1,7 @@
 import os
+import re
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 HEADER_PATH = Path(__file__).parent.parent / "shaders" / "common" / "header.glsl"
 
@@ -73,3 +74,39 @@ def load_shader_from_file(path: Path, defines: Optional[dict] = None) -> str:
         source = f.read()
         
     return assemble_shader(source, defines)
+
+
+# `// @param name type default min max "label"` — shared by the shader
+# listing API, the modulation matrix and the renderer (default binding).
+# Mirrors web/js/webgl/renderer.js::_parseShaderParams.
+_PARAM_RE = re.compile(
+    r'^[ \t]*//[ \t]*@param[ \t]+(\w+)[ \t]+(\w+)[ \t]+(\S+)[ \t]+(\S+)'
+    r'[ \t]+(\S+)[ \t]+(.+?)[ \t]*$',
+    re.MULTILINE,
+)
+
+
+def parse_params(src: str) -> List[Dict[str, Any]]:
+    """Parse ``@param`` declarations anywhere in a shader source.
+
+    Only ``float`` / ``int`` params with numeric default/min/max are kept;
+    anything else (prose that happens to start with ``// @param``) is
+    ignored. The first declaration of a name wins.
+    """
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for m in _PARAM_RE.finditer(src or ""):
+        name, ptype, p_def, p_min, p_max, label = m.groups()
+        if ptype not in ("float", "int") or name in seen:
+            continue
+        conv = float if ptype == "float" else int
+        try:
+            default, lo, hi = conv(p_def), conv(p_min), conv(p_max)
+        except ValueError:
+            continue
+        if len(label) >= 2 and label.startswith('"') and label.endswith('"'):
+            label = label[1:-1]
+        seen.add(name)
+        out.append({"name": name, "type": ptype, "default": default,
+                    "min": lo, "max": hi, "label": label})
+    return out
