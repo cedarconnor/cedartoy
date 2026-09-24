@@ -393,6 +393,11 @@ class Renderer:
         # MusiCue bundle integration
         self.bundle_eval = None
         self.spectrum_synth = None
+        self.mod_eval = None
+        # @param defaults, so knobs missing from shader_parameters render at
+        # their declared default instead of 0.
+        from .modulation import job_params
+        self._param_defaults = {p["name"]: p["default"] for p in job_params(job)}
         self.bundle_mode = getattr(job, "bundle_mode", "auto")
         self.bundle_blend = getattr(job, "bundle_blend", 0.5)
         self.track_settings = getattr(job, "track_settings", {}) or {}
@@ -423,6 +428,10 @@ class Renderer:
                     for tid in BAND_TRACKS
                 }
                 self._eff_series_len = n
+                # Modulation matrix: routes -> @param values (None if unused).
+                from .modulation import build_job_modulation
+                self.mod_eval = build_job_modulation(
+                    job, result.bundle, duration_sec=n / job.fps + 1.0)
                 if self.bundle_mode == "auto":
                     self.bundle_mode = "cued"
             elif self.bundle_mode == "auto":
@@ -1128,9 +1137,13 @@ class Renderer:
             'iCameraUp': tuple(cam_up),
         }
         
-        # Inject custom shader parameters
+        # Inject custom shader parameters (declared defaults, then overrides,
+        # then modulation-matrix values at this temporal sample's time).
+        uni.update(self._param_defaults)
         for k, v in self.job.shader_parameters.items():
             uni[k] = v
+        if self.mod_eval is not None:
+            uni.update(self.mod_eval.evaluate_at(time_val))
 
         # Standard Shadertoy time/date uniforms
         uni['iDate'] = date_uniform(self._render_start_dt, time_val)

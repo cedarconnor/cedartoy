@@ -194,6 +194,7 @@ def config_to_job(cfg: dict) -> RenderJob:
         bundle_blend=cfg.get("bundle_blend", 0.5),
         av_offset_ms=float(cfg.get("av_offset_ms", 0.0) or 0.0),
         track_settings=cfg.get("track_settings", {}),
+        modulation_routes=cfg.get("modulation_routes"),
     )
 
 def run_ui_server(args):

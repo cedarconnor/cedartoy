@@ -1,7 +1,9 @@
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .modulation import Route
 
 
 CameraMode = Literal["2d", "equirect", "ll180"]
@@ -72,6 +74,9 @@ class CedarToyConfig(BaseModel):
     disk_streaming: Optional[bool] = None
     shader_parameters: Dict[str, Any] = Field(default_factory=dict)
     track_settings: Dict[str, TrackSetting] = Field(default_factory=dict)
+    # Modulation matrix routes. None = use the shader's `// @mod` defaults;
+    # a list (even empty) replaces them.
+    modulation_routes: Optional[List[Route]] = None
     channels: Optional[Dict[int, str]] = None
     iChannel_paths: Optional[Dict[int, str]] = None
     multipass: Optional[Dict[str, Any]] = None

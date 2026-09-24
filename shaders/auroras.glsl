@@ -2,6 +2,23 @@
 // Auroras by nimitz 2017 (twitter: @stormoid)
 // License Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License
 // Contact the author for other licensing options
+//
+// Knobs for the CedarToy modulation matrix. Defaults are the original
+// constants, so the look is unchanged unless a route moves them.
+// @param aurora_drift float 0.0 0.0 20.0 "Aurora drift (phase)"
+// @param aurora_gain float 1.8 0.5 4.0 "Aurora brightness"
+// @param star_gain float 0.8 0.0 3.0 "Stars"
+// @param sky_level float 0.63 0.2 1.5 "Sky level"
+// Default routes (edit in Stage 2 > Modulation; a saved route list replaces these):
+// @mod aurora_drift <- iEnergy depth=2.0 attack=1 release=2 mode=integrate
+// @mod aurora_gain <- iKick depth=0.8 release=0.5 curve=ease_out
+// @mod star_gain <- iHat depth=1.2 release=0.25
+// @mod sky_level <- iSectionEnergy depth=0.4 attack=4 release=8
+
+uniform float aurora_drift;
+uniform float aurora_gain;
+uniform float star_gain;
+uniform float sky_level;
 
 #define time iTime
 
@@ -20,7 +37,7 @@ float triNoise2d(in vec2 p, float spd)
 	for (float i=0.; i<5.; i++ )
 	{
         vec2 dg = tri2(bp*1.85)*.75;
-        dg *= mm2(time*spd);
+        dg *= mm2((time + aurora_drift)*spd);
         p -= dg/z2;
 
         bp *= 1.3;
@@ -57,7 +74,7 @@ vec4 aurora(vec3 ro, vec3 rd)
     
     col *= (clamp(rd.y*15.+.4,0.,1.));
     
-    return col*1.8;
+    return col*aurora_gain;
 }
 
 
@@ -86,7 +103,7 @@ vec3 stars(in vec3 p)
         c += c2*(mix(vec3(1.0,0.49,0.1),vec3(0.75,0.9,1.),rn.y)*0.1+0.9);
         p *= 1.3;
     }
-    return c*c*.8;
+    return c*c*star_gain;
 }
 
 vec3 bg(in vec3 rd)
@@ -94,7 +111,7 @@ vec3 bg(in vec3 rd)
     float sd = dot(normalize(vec3(-0.5, -0.6, 0.9)), rd)*0.5+0.5;
     sd = pow(sd, 5.);
     vec3 col = mix(vec3(0.05,0.1,0.2), vec3(0.1,0.05,0.2), sd);
-    return col*.63;
+    return col*sky_level;
 }
 //-----------------------------------------------------------
 

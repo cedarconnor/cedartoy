@@ -87,3 +87,7 @@ class RenderJob:
 
     # Per-track reactivity settings: {track_id: {gain, mute, threshold, smoothing}}
     track_settings: Dict[str, Any] = field(default_factory=dict)
+
+    # Modulation matrix routes (list of Route dicts/models). None = use the
+    # shader's `// @mod` defaults; [] = no routes.
+    modulation_routes: Optional[List[Any]] = None

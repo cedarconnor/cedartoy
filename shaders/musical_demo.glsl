@@ -16,6 +16,16 @@
 // shaders: the scene is defined purely by ray direction.
 //
 // cookbook_version: 3
+//
+// Knobs for the CedarToy modulation matrix (defaults = the original look):
+// @param fog_density float 0.06 0.01 0.2 "Fog density"
+// @param chaser_gain float 0.6 0.0 2.0 "Chaser light"
+// @param exposure float 1.4 0.5 3.0 "Exposure"
+// @param swirl_phase float 0.0 0.0 20.0 "Swirl (phase)"
+// @mod fog_density <- iEnergy depth=-0.03 attack=0.5 release=2
+// @mod chaser_gain <- iSnare depth=0.8 release=0.5 curve=ease_out
+// @mod exposure <- downbeat_pulse depth=0.4 release=1
+// @mod swirl_phase <- iEnergyFast depth=0.25 mode=integrate
 
 // MusiCue bundle uniforms — declared so the headless render compiles.
 // (The web preview auto-declares these and strips these lines.)
@@ -28,6 +38,12 @@ uniform float iKick;
 uniform float iBass;
 uniform float iVocals;
 uniform float iBuild;
+
+// Modulation-matrix knobs (see @param lines above).
+uniform float fog_density;
+uniform float chaser_gain;
+uniform float exposure;
+uniform float swirl_phase;
 
 const float TAU = 6.283185307179586;
 
@@ -74,7 +90,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     }
 
     // === bar_phase_camera === roll <- iBeatClock (slow turn) + iBarPhase (swing)
-    float roll = TAU * beatClk / 64.0 + 0.12 * sin(TAU * barPh);
+    float roll = TAU * beatClk / 64.0 + 0.12 * sin(TAU * barPh) + swirl_phase;
     rd.xy = rot(roll) * rd.xy;
 
     // ---- tunnel intersection ----
@@ -95,14 +111,14 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     float v = z * ringsPerUnit;
     float lines = max(gridLine(u, 0.03), gridLine(v, 0.04));
 
-    float fog = exp(-0.06 * t);
+    float fog = exp(-fog_density * t);
     vec3 base = palette(sid * 0.21 + z * 0.015);
     vec3 col = base * (0.10 + 0.9 * lines) * fog;
 
     // Chaser: a light that laps the tunnel once per bar (loop-closed at wrap).
     float chaseAng = TAU * barPh - PI;
     float dAng = abs(mod(ang - chaseAng + PI, TAU) - PI);
-    col += palette(sid * 0.21 + 0.5) * exp(-6.0 * dAng) * 0.6 * fog * (0.4 + lines);
+    col += palette(sid * 0.21 + 0.5) * exp(-6.0 * dAng) * chaser_gain * fog * (0.4 + lines);
 
     // Kick shock ring: rides away from the camera as the envelope decays.
     float ringPos = (1.0 - iKick) * 14.0;
@@ -120,7 +136,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     col *= 1.0 + 0.8 * tension * lines;
 
     // Tone map + gamma.
-    col = 1.0 - exp(-col * 1.4);
+    col = 1.0 - exp(-col * exposure);
     col = pow(col, vec3(0.4545));
     fragColor = vec4(col, 1.0);
 }
