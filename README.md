@@ -138,6 +138,25 @@ Each lane has **M**(ute) and **S**(olo) buttons and draws its data in its native
 
 **A/B comparison grid.** The **A/B** toggle splits the preview into four synchronized panels — **raw FFT**, **cued** (bundle), **blend**, and **no-audio** — same shader, same playhead — so you can see at a glance whether the MusiCue data is helping or hiding the music.
 
+### Reactivity scorecard
+
+A number for "does it actually follow the music?". The scorecard reads rendered frames (PNG/TIFF/EXR, box-filtered down to ≤ 256 px wide) and measures three visual features per frame — **brightness** (mean luminance), **motion** (mean frame-to-frame difference) and **hue** shift — then correlates each with every musical signal the render used (`iKick`, `iHat`, `iEnergy`, `iBuild`, `iBarPhase`, … plus beat/downbeat pulses; post-mute/calibration, with your A/V offset). Onset-like sources are also scored on their rising edges. For each source it reports the best Pearson *r* within ±3 frames and its lag (negative = the visuals lag the audio). It also reports **jitter** (share of motion in bursts with no beat or onset within ±2 frames: visuals twitching without musical cause) and a **loud vs quiet** check (do quiet passages look calmer than loud ones?).
+
+```
+Reactivity scorecard (2880 frames, bundle signals)
+  kick → motion r=0.71 (lag 0)
+  energy → brightness r=0.55 (lag -1)
+  hats: no visible effect
+  jitter 0.32: high
+  loud vs quiet: motion ×2.4, brightness +0.12 — loud passages hit harder
+```
+
+- **Validate mode:** **Score reactivity** renders a fast 512×256 proxy of the current config on the server, scores it, and shows the summary plus a per-source bar list (best |r|, colored by brightness / motion / hue).
+- **CLI, existing frames:** `python -m cedartoy.cli scorecard renders/test --audio my_song/song.wav --fps 30 [--bundle b.json] [--av-offset-ms 40] [--json score.json]`
+- **CLI, render + score:** add `--scorecard` to any `render` command to render the 512×256 proxy (1 temporal sample, no supersampling or tiling) to a temp dir and score it instead of doing the full render.
+
+Without a MusiCue bundle the only source is the audio's RMS level (a rough proxy); with neither bundle nor audio the scorecard refuses to run.
+
 ---
 
 ## MusiCue integration

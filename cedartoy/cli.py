@@ -12,6 +12,7 @@ from .render import Renderer
 from .webserver import run_server
 from .types import RenderJob, MultipassGraphConfig, BufferConfig, AudioMeta
 from .options_schema import OPTIONS
+from . import scorecard
 
 def create_default_multipass(shader_path: Path, channels: Optional[Dict[int, str]] = None) -> MultipassGraphConfig:
     # Single pass "Image"
@@ -244,6 +245,11 @@ def main():
             render_parser.add_argument(arg_name, type=float, help=opt.help_text or opt.label)
         else:
             render_parser.add_argument(arg_name, type=str, help=opt.help_text or opt.label)
+    render_parser.add_argument("--scorecard", action="store_true",
+                               help="Render a fast 512x256 proxy to a temp dir and print a reactivity scorecard")
+    render_parser.add_argument("--scorecard-json", help="With --scorecard: also write the result JSON here")
+
+    scorecard.add_scorecard_parser(subparsers)
 
     # Wizard
     wizard_parser = subparsers.add_parser("wizard", help="Run configuration wizard")
@@ -273,6 +279,12 @@ def main():
         run_ui_server(args)
         return
 
+    if args.command == "scorecard":
+        code = scorecard.run_scorecard_cli(args)
+        if code:
+            sys.exit(code)
+        return
+
     if args.command == "render":
         if not args.shader and not args.config:
             parser.error("render requires a shader path or --config with a 'shader' entry.")
@@ -297,7 +309,15 @@ def main():
             cli_args["shader"] = args.shader
             
         cfg = build_config(Path(args.config) if args.config else None, cli_args)
-        
+
+        if args.scorecard:
+            code = scorecard.run_render_scorecard(
+                cfg, lambda proxy: Renderer(config_to_job(proxy)).render(),
+                json_out=args.scorecard_json)
+            if code:
+                sys.exit(code)
+            return
+
         # Create Job
         job = config_to_job(cfg)
         
