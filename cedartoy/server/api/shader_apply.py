@@ -7,6 +7,7 @@ shader for the preview to compile against.
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Literal
@@ -23,6 +24,9 @@ class ApplyRequest(BaseModel):
     base: str = Field(..., description="Original shader filename (e.g. 'phantom_mode.glsl').")
     glsl: str = Field(..., description="Full GLSL source to write.")
     mode: Literal["sibling", "overwrite"] = "sibling"
+    # Sibling name suffix: <stem>_reactive.glsl (Make reactive) or
+    # <stem>_knobs.glsl (Expose knobs).
+    kind: Literal["reactive", "knobs"] = "reactive"
 
 
 def _atomic_write(target: Path, content: str) -> None:
@@ -40,22 +44,45 @@ def _atomic_write(target: Path, content: str) -> None:
         raise
 
 
+_SAFE_PART = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]*$")
+
+
+def _resolve_base(base: str) -> Path:
+    """Validate `base` as a relative .glsl path inside SHADERS_DIR.
+
+    Each path component must be a plain name (no '..', no absolute paths or
+    drive letters, no backslashes) and the file must end in .glsl. The
+    resolved path (after following symlinks) must stay inside SHADERS_DIR.
+    Raises HTTP 400 otherwise.
+    """
+    parts = base.split("/") if base else []
+    if not parts or not all(_SAFE_PART.match(p) for p in parts):
+        raise HTTPException(status_code=400, detail="invalid shader name")
+    if not parts[-1].lower().endswith(".glsl"):
+        raise HTTPException(status_code=400, detail="shader must be a .glsl file")
+    root = SHADERS_DIR.resolve()
+    candidate = (root / Path(*parts)).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="base outside shaders directory")
+    if candidate.suffix.lower() != ".glsl":
+        raise HTTPException(status_code=400, detail="shader must be a .glsl file")
+    return candidate
+
+
 @router.post("/apply")
 def shader_apply(body: ApplyRequest) -> dict:
     if not body.glsl.strip():
         raise HTTPException(status_code=400, detail="glsl is empty")
 
-    candidate = (SHADERS_DIR / body.base).resolve()
-    try:
-        candidate.relative_to(SHADERS_DIR.resolve())
-    except ValueError:
-        raise HTTPException(status_code=400, detail="base outside shaders directory")
+    candidate = _resolve_base(body.base)
 
-    if not candidate.exists():
+    if not candidate.is_file():
         raise HTTPException(status_code=404, detail=f"base shader not found: {body.base}")
 
     if body.mode == "sibling":
-        target = candidate.with_name(f"{candidate.stem}_reactive.glsl")
+        target = candidate.with_name(f"{candidate.stem}_{body.kind}.glsl")
     else:
         target = candidate
 

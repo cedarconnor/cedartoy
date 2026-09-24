@@ -46,7 +46,7 @@ def test_pick_folder_accepts_initial_dir(client, tmp_path):
 
 def test_pick_folder_503_when_no_display(client):
     # tkinter raises TclError when there's no display. We surface 503.
-    import tkinter as tk
+    tk = pytest.importorskip("tkinter")
     with patch(
         "cedartoy.server.api.dialog._ask_directory",
         side_effect=tk.TclError("no display name and no $DISPLAY environment variable"),
@@ -54,6 +54,16 @@ def test_pick_folder_503_when_no_display(client):
         resp = client.post("/api/dialog/pick-folder", json={})
     assert resp.status_code == 503
     assert "display" in resp.json()["detail"].lower()
+
+
+def test_pick_folder_503_when_tkinter_missing(client):
+    from cedartoy.server.api.dialog import DialogUnavailable
+    with patch(
+        "cedartoy.server.api.dialog._ask_directory",
+        side_effect=DialogUnavailable("tkinter is not installed"),
+    ):
+        resp = client.post("/api/dialog/pick-folder", json={})
+    assert resp.status_code == 503
 
 
 def test_open_folder_reveals_existing_dir(client, tmp_path):

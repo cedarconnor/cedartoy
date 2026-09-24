@@ -12,6 +12,7 @@ from .render import Renderer
 from .webserver import run_server
 from .types import RenderJob, MultipassGraphConfig, BufferConfig, AudioMeta
 from .options_schema import OPTIONS
+from . import scorecard
 
 def create_default_multipass(shader_path: Path, channels: Optional[Dict[int, str]] = None) -> MultipassGraphConfig:
     # Single pass "Image"
@@ -192,7 +193,9 @@ def config_to_job(cfg: dict) -> RenderJob:
         bundle_path=Path(cfg["bundle_path"]) if cfg.get("bundle_path") else None,
         bundle_mode=cfg.get("bundle_mode", "auto"),
         bundle_blend=cfg.get("bundle_blend", 0.5),
+        av_offset_ms=float(cfg.get("av_offset_ms", 0.0) or 0.0),
         track_settings=cfg.get("track_settings", {}),
+        modulation_routes=cfg.get("modulation_routes"),
     )
 
 def run_ui_server(args):
@@ -212,10 +215,14 @@ def run_ui_server(args):
 
         threading.Thread(target=open_browser, daemon=True).start()
 
+    host = getattr(args, "host", None) or "127.0.0.1"
     print(f"Starting CedarToy Web UI on http://localhost:{args.port}")
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print(f"WARNING: listening on {host} — the UI can read/write local files; "
+              f"only expose it on trusted networks.")
     print("Press Ctrl+C to stop")
 
-    uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="info")
+    uvicorn.run(app, host=host, port=args.port, log_level="info")
 
 def main():
     parser = argparse.ArgumentParser(description="CedarToy Renderer")
@@ -238,6 +245,11 @@ def main():
             render_parser.add_argument(arg_name, type=float, help=opt.help_text or opt.label)
         else:
             render_parser.add_argument(arg_name, type=str, help=opt.help_text or opt.label)
+    render_parser.add_argument("--scorecard", action="store_true",
+                               help="Render a fast 512x256 proxy to a temp dir and print a reactivity scorecard")
+    render_parser.add_argument("--scorecard-json", help="With --scorecard: also write the result JSON here")
+
+    scorecard.add_scorecard_parser(subparsers)
 
     # Wizard
     wizard_parser = subparsers.add_parser("wizard", help="Run configuration wizard")
@@ -250,6 +262,8 @@ def main():
     ui_parser = subparsers.add_parser("ui", help="Start web UI server")
     ui_parser.add_argument("--port", type=int, default=8080, help="Server port")
     ui_parser.add_argument("--no-browser", action="store_true", help="Do not open browser automatically")
+    ui_parser.add_argument("--host", default="127.0.0.1",
+                           help="Interface to bind (default 127.0.0.1; use 0.0.0.0 to expose on the network)")
 
     args = parser.parse_args()
     
@@ -263,6 +277,12 @@ def main():
 
     if args.command == "ui":
         run_ui_server(args)
+        return
+
+    if args.command == "scorecard":
+        code = scorecard.run_scorecard_cli(args)
+        if code:
+            sys.exit(code)
         return
 
     if args.command == "render":
@@ -289,7 +309,15 @@ def main():
             cli_args["shader"] = args.shader
             
         cfg = build_config(Path(args.config) if args.config else None, cli_args)
-        
+
+        if args.scorecard:
+            code = scorecard.run_render_scorecard(
+                cfg, lambda proxy: Renderer(config_to_job(proxy)).render(),
+                json_out=args.scorecard_json)
+            if code:
+                sys.exit(code)
+            return
+
         # Create Job
         job = config_to_job(cfg)
         

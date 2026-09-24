@@ -43,6 +43,10 @@ def test_bundle_uniforms_set_matches_spec():
     assert set(BUNDLE_UNIFORMS) == {
         "iBpm", "iBeat", "iBar", "iSectionEnergy", "iSectionId",
         "iEnergy", "iChannel0",
+        "iBeatClock", "iBarPhase", "iPhrasePhase", "iSectionProgress",
+        "iTimeToNextSection", "iBuild", "iKick", "iSnare", "iHat",
+        "iBass", "iVocals", "iDrums", "iOther", "iBrightness",
+        "iEnergyFast", "iMusicTime",
     }
 
 

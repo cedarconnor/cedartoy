@@ -45,6 +45,8 @@ async def health_check():
 # Import and mount API routers
 from .api import shaders, config, audio, render, files, project, reactivity, dialog
 from .api import shader_apply
+from .api import modulation as modulation_api
+from .api import scorecard
 from .websocket import router as ws_router
 
 app.include_router(shaders.router, prefix="/api/shaders", tags=["shaders"])
@@ -56,6 +58,8 @@ app.include_router(project.router, prefix="/api/project", tags=["project"])
 app.include_router(reactivity.router, prefix="/api/reactivity", tags=["reactivity"])
 app.include_router(dialog.router, prefix="/api/dialog", tags=["dialog"])
 app.include_router(shader_apply.router, prefix="/api/shader", tags=["shader"])
+app.include_router(modulation_api.router, prefix="/api/modulation", tags=["modulation"])
+app.include_router(scorecard.router, prefix="/api/scorecard", tags=["scorecard"])
 app.include_router(ws_router, prefix="/ws", tags=["websocket"])
 
 # Serve static files (frontend) - MUST be last to not intercept API routes

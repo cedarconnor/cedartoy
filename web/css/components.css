@@ -597,3 +597,60 @@ transport-strip { display: block; }
     opacity: 0.4;
     cursor: not-allowed;
 }
+
+/* Modulation matrix (Stage 2) */
+modulation-panel { display: block; }
+.mod-status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 0;
+}
+.mod-status .btn { padding: 2px 8px; font-size: 11px; white-space: nowrap; }
+.mod-param {
+    border-top: 1px solid var(--border);
+    padding: 8px 0;
+}
+.mod-param-head {
+    display: grid;
+    grid-template-columns: minmax(70px, 1fr) minmax(80px, 2fr) 48px minmax(50px, 1fr) 48px;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+}
+.mod-param-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mod-base-val, .mod-live-val { font-family: monospace; font-size: 11px; text-align: right; }
+.mod-live-val { color: #7ec97e; }
+.mod-meter {
+    position: relative;
+    height: 8px;
+    background: #0f0f0f;
+    border: 1px solid #333;
+    border-radius: 3px;
+    overflow: hidden;
+}
+.mod-meter-fill { height: 100%; width: 0; background: #4a8a4a; }
+.mod-meter-base {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    margin-left: -1px;
+    background: #ddd;
+}
+.mod-routes { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.mod-route {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+}
+.mod-route.mod-route-off { opacity: 0.5; }
+.mod-route .form-select,
+.mod-route .form-input { padding: 2px 4px; font-size: 11px; width: auto; }
+.mod-route input[type="number"] { width: 58px; }
+.mod-route label { display: flex; align-items: center; gap: 2px; color: var(--text-secondary); }
+.mod-route .mod-remove,
+.mod-param .mod-add { padding: 2px 8px; font-size: 11px; }

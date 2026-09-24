@@ -1,7 +1,8 @@
 """Native OS folder picker, surfaced as POST /api/dialog/pick-folder.
 
 The actual dialog runs in tkinter. tkinter is part of Python's stdlib so
-no extra dependency is needed. FastAPI runs synchronous route handlers
+no extra dependency is needed; it is imported lazily so the server still
+starts (and the rest of the API works) on Pythons built without it. FastAPI runs synchronous route handlers
 in a worker thread, so the dialog blocks only this request — other
 requests keep flowing.
 """
@@ -10,14 +11,21 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 router = APIRouter()
+
+
+class DialogUnavailable(RuntimeError):
+    """Raised when no native dialog can be shown (no tkinter / no display)."""
+
+
+def _is_dialog_unavailable(exc: BaseException) -> bool:
+    # tkinter.TclError is matched by name so tkinter needn't be imported.
+    return isinstance(exc, DialogUnavailable) or type(exc).__name__ == "TclError"
 
 
 class PickFolderRequest(BaseModel):
@@ -32,9 +40,16 @@ def _ask_directory(*, initial_dir: str | None = None) -> str:
     """Open a native folder picker and return the chosen path.
 
     Returns "" when the user cancels (matching tkinter's contract).
-    Raises tk.TclError when no display is available (headless / CI).
-    Isolated as a module-level function so tests can mock it cleanly.
+    Raises DialogUnavailable when tkinter is missing, or tk.TclError when
+    no display is available (headless / CI). Isolated as a module-level
+    function so tests can mock it cleanly.
     """
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError as e:
+        raise DialogUnavailable(f"tkinter is not installed: {e}") from e
+
     # tkinter requires a root window. Create + hide + destroy to avoid
     # leaving a leaked Tk instance behind.
     root = tk.Tk()
@@ -56,7 +71,9 @@ def _ask_directory(*, initial_dir: str | None = None) -> str:
 def pick_folder(body: PickFolderRequest) -> dict:
     try:
         chosen = _ask_directory(initial_dir=body.initial_dir)
-    except tk.TclError as e:
+    except Exception as e:
+        if not _is_dialog_unavailable(e):
+            raise
         raise HTTPException(
             status_code=503,
             detail=f"Native dialog unavailable (no display): {e}",

@@ -94,3 +94,36 @@ def test_shader_apply_rejects_path_traversal(client, temp_shader):
         "mode": "sibling",
     })
     assert resp.status_code in (400, 403, 404)
+
+
+@pytest.mark.parametrize("base", [
+    "/etc/passwd",
+    "../cedartoy.yaml",
+    "..\\\\cedartoy.yaml",
+    "test_apply_temp.txt",
+    "sub/../../x.glsl",
+    "C:/x.glsl",
+    "",
+])
+def test_shader_apply_rejects_unsafe_base(client, temp_shader, base):
+    resp = client.post("/api/shader/apply", json={
+        "base": base,
+        "glsl": "void main(){}",
+        "mode": "overwrite",
+    })
+    assert resp.status_code == 400, (base, resp.status_code)
+
+
+def test_shader_apply_rejects_non_glsl_file_in_shaders_dir(client):
+    victim = SHADERS_DIR / "test_apply_victim.txt"
+    victim.write_text("keep me", encoding="utf-8")
+    try:
+        resp = client.post("/api/shader/apply", json={
+            "base": victim.name,
+            "glsl": "void main(){}",
+            "mode": "overwrite",
+        })
+        assert resp.status_code == 400
+        assert victim.read_text(encoding="utf-8") == "keep me"
+    finally:
+        victim.unlink(missing_ok=True)

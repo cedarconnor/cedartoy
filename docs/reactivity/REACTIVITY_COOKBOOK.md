@@ -1,6 +1,6 @@
-# MusiCue Reactivity Cookbook — v2
+# MusiCue Reactivity Cookbook — v3
 
-`cookbook_version: 2`
+`cookbook_version: 3`
 
 A vocabulary of *kinds of mappings* between musical signals and visual
 parameters. **This is not a menu to pick from.** Each entry sketches a
@@ -11,11 +11,31 @@ when the shader's structure suggests it.
 Available CedarToy bindings:
 
 - `iChannel0` — 2×512 musical spectrum texture
-  (row 0.25 = frequency, row 0.75 = tempo-locked heartbeat)
+  (row 0.25 = frequency, row 0.75 = tempo-locked heartbeat). Row-0 bands:
+  low (x < 0.0625) = kick + bass, low-mid = snare + tom, mid-high = hats +
+  cymbals, high (x > 0.5) = vocals + other.
 - `iBpm` `iBeat` `iBar` `iSectionEnergy` `iSectionId` `iEnergy` — bundle uniforms
   (`iSectionId` is a stable int per section label — all verses share one id,
   all choruses another; use it when a change should happen on
   verse/chorus/bridge boundaries.)
+- Musical-structure uniforms (all `float`, declare the ones you use):
+
+  | Uniform | Range | Meaning |
+  |---|---|---|
+  | `iBeatClock` | continuous | Beat count from the real beat grid (index + phase). Monotonic, phase-locked to actual beats even when tempo drifts. `fract(iBeatClock)` = beat phase, `floor` = beat index. Negative before the first beat. |
+  | `iBarPhase` | 0..1 | Position within the bar (from downbeats), continuous. |
+  | `iPhrasePhase` | 0..1 | Position within the phrase (MusiCue phrases when present, else 4-bar groups). |
+  | `iSectionProgress` | 0..1 | Position within the current section. |
+  | `iTimeToNextSection` | seconds | Time until the next section starts (1000 when none). |
+  | `iBuild` | 0..1 | Anticipation ramp into higher-energy sections; drops to 0 at the drop. |
+  | `iKick` `iSnare` `iHat` | 0..1 | Drum envelopes: instant attack, decay to ~10% in half a beat (tempo-relative). |
+  | `iBass` `iVocals` `iDrums` `iOther` | 0..1 | Per-stem loudness (0 when the bundle has no stems). |
+  | `iBrightness` | 0..1 | Spectral brightness of the mix. |
+  | `iEnergyFast` | 0..1 | Short-window loudness (falls back to `iEnergy`). |
+  | `iMusicTime` | seconds | Drop-in `iTime` replacement that runs faster in loud passages and slower in quiet ones (mean rate 1, monotonic, smooth). Equals `iTime` without a bundle. |
+
+  Signals the bundle lacks are 0 (see the song data summary appended
+  to the prompt), so every mapping should still look right at 0.
 - `iTime` `iResolution` — standard Shadertoy
 
 Each snippet's first line is its lineage header — keep it (or adapt
@@ -102,8 +122,10 @@ Camera, UV, and speed controls are sensitive to discontinuities. Treat
 every beat. That is fine for colour pulses and loop-closed functions
 where `f(0) == f(1)`, but it creates visible stutter when it directly
 drives camera angle, object position, scroll speed, or accumulated time.
-For smooth tempo-locked motion, derive a continuous clock from
-`iTime * iBpm / 60.0`, then optionally add small beat accents on top.
+For smooth tempo-locked motion use `iBeatClock` (continuous, phase-locked
+to the real beat grid) or `iBarPhase`, then optionally add small beat
+accents on top. `iTime * iBpm / 60.0` is continuous too, but it drifts off
+the real beats whenever the tempo wanders.
 
 ### kick_pulse_camera
 
@@ -117,6 +139,9 @@ float kickEnergy = texture(iChannel0, vec2(0.03, 0.25)).r;
 vec3 cameraPushOffset = cameraForward * kickEnergy * 0.12;
 // add cameraPushOffset to ray origin / eye position
 ```
+
+Tip: the iChannel0 low band carries kick *and* bass; use `iKick` instead
+of the texture read when you want the kick alone.
 
 Reads as: the camera lurches forward and back with the kick. Make sure
 the push is large enough to be perceived — small camera moves disappear
@@ -151,9 +176,9 @@ so the camera angle snaps at beat boundaries inside the bar. Use a
 continuous tempo clock for camera / speed / position motion.
 
 ```glsl
-// === camera_rock_subtle (cookbook_version 2) ===
-// ray roll ← continuous tempo clock — smooth sway without beat-boundary snaps
-float tempoBeat = iTime * max(iBpm, 0.0) / 60.0;
+// === camera_rock_subtle (cookbook_version 3) ===
+// ray roll ← iBeatClock — smooth sway without beat-boundary snaps
+float tempoBeat = iBeatClock;                           // continuous, beat-locked
 float rockEnabled = step(1.0, iBpm);                    // zero when no bundle/BPM
 float rockAngle = rockEnabled * (
     sin(tempoBeat * 0.3927) * 0.030       // ~16-beat sway
@@ -166,6 +191,25 @@ d.xy = mat2(cos(rockAngle), -sin(rockAngle),
 Reads as: the scene seems to gently rock with the music. Easy to miss
 consciously, hard to do without once it's there. Keep total amplitude
 under ~0.06 rad (~3.5°) or it starts feeling drunk.
+
+### bar_phase_camera
+
+Smooth, bar-locked camera drift. `iBarPhase` sweeps 0→1 across each bar
+and `iBeatClock` never jumps, so the camera lands on the downbeat every
+bar without a single snap. Use a loop-closed function of `iBarPhase`
+(`f(0) == f(1)`) so the wrap at the downbeat is invisible.
+
+```glsl
+// === bar_phase_camera (cookbook_version 3) ===
+// camera orbit ← iBarPhase + iBeatClock — smooth, lands on every downbeat
+float barSwing = sin(6.2832 * iBarPhase);                // loop-closed per bar
+float drift = iBeatClock / 64.0;                         // one slow turn every 64 beats
+float camYaw = 6.2832 * drift + 0.08 * barSwing;
+d.xz = mat2(cos(camYaw), -sin(camYaw), sin(camYaw), cos(camYaw)) * d.xz;
+```
+
+Reads as: the camera glides in time with the bar structure; the
+downbeat is where each swing turns around.
 
 ### hat_shimmer
 
@@ -183,6 +227,67 @@ col += col * shimmer;
 
 Reads as: a faint chromatic vibration that intensifies on hi-hat
 patterns.
+
+---
+
+## Speed, structure & stems
+
+### music_time_flow
+
+Use `iMusicTime` wherever the shader uses `iTime` for *flow speed*
+(scrolling, advection, fly-through distance, noise evolution). It runs
+faster in loud passages and slower in quiet ones, but it is monotonic
+and smooth, so this is the **safe way to modulate speed** — never
+multiply `iTime` by an audio signal (see "Patterns that almost never
+read"). Without a bundle `iMusicTime == iTime`.
+
+```glsl
+// === music_time_flow (cookbook_version 3) ===
+// flow clock ← iMusicTime — faster in loud passages, never jitters
+float flowT = iMusicTime;              // was: iTime
+vec2 flowUv = fragCoord / iResolution.y + vec2(flowT * 0.1, 0.0);
+// ...use flowT everywhere the shader advected by iTime
+```
+
+Reads as: the piece surges forward in the chorus and drifts in the
+breakdown, with no stutter.
+
+### build_tension
+
+`iBuild` ramps 0→1 over the bars before a lift into a higher-energy
+section and snaps to 0 on the drop. Ramp a tension parameter (warp,
+contrast, desaturation, zoom) with it so the drop releases it.
+
+```glsl
+// === build_tension (cookbook_version 3) ===
+// tension ← iBuild — winds up into the drop, releases on it
+float tension = iBuild * iBuild;                   // ease-in
+float warpAmt = mix(0.1, 0.6, tension);
+vec3 grey = vec3(dot(col, vec3(0.299, 0.587, 0.114)));
+col = mix(col, grey, 0.5 * tension);               // drain colour into the drop
+col *= 1.0 + 0.3 * tension;
+// ...feed warpAmt into the shader's domain warp strength
+```
+
+Reads as: anticipation you can see; the drop lands as a release.
+
+### stem_layers
+
+Give each stem its own visual layer: bass drives large-scale warp or
+scale, vocals drive glow. Both are loudness curves (smooth), so they
+can go straight into shape parameters. They read 0 when the bundle has
+no stems, so keep the zero case a good default.
+
+```glsl
+// === stem_layers (cookbook_version 3) ===
+// scale/warp ← iBass, glow ← iVocals — each stem owns one layer
+float bassScale = 1.0 + 0.25 * iBass;              // bass swells the geometry
+vec2 suv = (fragCoord - 0.5 * iResolution.xy) / iResolution.y / bassScale;
+float glow = 0.4 * iVocals;
+col += glow * vec3(1.0, 0.75, 0.55) * smoothstep(0.4, 1.0, length(col));
+```
+
+Reads as: low end moves the world, the voice lights it.
 
 ---
 
@@ -314,15 +419,17 @@ reason.
   kicks but at `iTime=60s` even a 0.1 swing in the multiplier is six
   whole radians of angle change per frame. Reads as catastrophic
   jitter. **Always add audio signals to angles/positions; never use
-  them as rate multipliers on accumulated time.**
+  them as rate multipliers on accumulated time.** If you want speed to
+  follow the music, swap `iTime` for `iMusicTime` (see
+  `music_time_flow`) — it is integrated offline, so it stays smooth.
 - **Using `iBeat` as a continuous clock for camera / speed / position.**
   `iBeat` is a phase inside the current beat; it wraps from ~1.0 back to
   0.0 every beat. `float(iBar) + iBeat` is also discontinuous because
   `iBar` increments once per bar, not once per beat. This makes camera
   roll, object position, fly-through speed, and scroll offsets visibly
-  stutter on the beat. Use `iTime * iBpm / 60.0` for smooth tempo motion,
-  and reserve `iBeat` for loop-closed pulses where the value returns to
-  the same state at phase 0 and phase 1.
+  stutter on the beat. Use `iBeatClock` (or `iBarPhase` / `iPhrasePhase`)
+  for smooth tempo motion, and reserve `iBeat` for loop-closed pulses
+  where the value returns to the same state at phase 0 and phase 1.
 - **Animating random hashes or `fract` seams with time-moving coordinates.**
   Expressions like `fract(sin(p) * 1e5)` are discontinuous. If `p`
   already moves with `iTime`, pixels cross random seams and pop between

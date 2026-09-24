@@ -39,3 +39,38 @@ def test_artifacts_are_listed_from_output_dir(tmp_path):
     artifacts = manager.list_artifacts(job.id)
 
     assert artifacts == [{"name": "frame_00001.png", "path": str(output_dir / "frame_00001.png"), "size": 3}]
+
+
+def test_claim_job_only_succeeds_once(tmp_path):
+    manager = RenderJobManager(work_dir=tmp_path)
+    job = manager.create_job({"shader": "shaders/test.glsl"})
+
+    assert manager.claim_job(job.id) is True
+    assert manager.get_job(job.id).status == JobStatus.RUNNING
+    assert manager.claim_job(job.id) is False
+
+
+def test_claim_job_refuses_cancelled(tmp_path):
+    manager = RenderJobManager(work_dir=tmp_path)
+    job = manager.create_job({"shader": "shaders/test.glsl"})
+    manager.cancel_job(job.id)
+    assert manager.claim_job(job.id) is False
+
+
+def test_websocket_does_not_start_job_twice(monkeypatch):
+    from fastapi.testclient import TestClient
+    from cedartoy.server import websocket as ws_mod
+    from cedartoy.server.app import app
+
+    spawned = []
+    monkeypatch.setattr(ws_mod.subprocess, "Popen",
+                        lambda *a, **k: spawned.append(a) or (_ for _ in ()).throw(RuntimeError("no spawn in tests")))
+    job = ws_mod.job_manager.create_job({"shader": "shaders/test.glsl"})
+    assert ws_mod.job_manager.claim_job(job.id)  # someone already started it
+
+    with TestClient(app).websocket_connect("/ws/render") as ws:
+        ws.send_json({"type": "start_render", "job_id": job.id})
+        msg = ws.receive_json()
+    assert msg["type"] == "render_error"
+    assert "already" in msg["message"]
+    assert spawned == []

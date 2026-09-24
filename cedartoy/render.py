@@ -14,6 +14,7 @@ from .types import RenderJob, BufferConfig, MultipassGraphConfig
 from .shader import load_shader_from_file
 from .audio import AudioProcessor
 from .naming import resolve_output_path
+from .image_io import write_image16
 from .options_schema import EXR_AVAILABLE
 
 
@@ -57,6 +58,155 @@ def _writer_kwargs_for_format(fmt: str, png_compress_level: int = 1) -> tuple:
         return "exr", {}
     # Fallback — unknown format string, write as-is and hope for the best.
     return fmt, {}
+
+
+def resolve_frame_end(frame_start: int, frame_end: int, fps: float,
+                      duration_sec: Optional[float],
+                      audio_duration_sec: Optional[float] = None) -> int:
+    """Resolve the exclusive end frame of a render.
+
+    `frame_end <= frame_start` means "derive from duration": job duration
+    first, then the audio duration, else zero frames.
+    """
+    start = int(frame_start)
+    end = int(frame_end)
+    if end <= start and fps > 0:
+        duration = duration_sec
+        if (duration is None or duration <= 0) and audio_duration_sec:
+            duration = audio_duration_sec
+        if duration is None or duration <= 0:
+            duration = 0.0
+        end = start + int(round(duration * fps))
+    return end
+
+
+def band_series_length(resolved_end: int, fps: float,
+                       audio_duration_sec: Optional[float] = None) -> int:
+    """Number of frames the precomputed per-track band series must cover:
+    every frame up to the resolved end frame and the full audio duration."""
+    n = max(0, int(resolved_end))
+    if audio_duration_sec and fps > 0:
+        n = max(n, int(math.ceil(audio_duration_sec * fps)))
+    return n + 1
+
+
+def sample_time(base_time: float, offset: float, shutter: float, fps: float) -> float:
+    """iTime for one temporal sample.
+
+    `shutter` is a fraction of the frame interval (0..1, 0.5 = 180 degrees),
+    so the sample spread in seconds is `shutter / fps`, centred on base_time.
+    `offset` is in [0, 1]; offset 0.5 (single sample) yields base_time exactly.
+    """
+    if fps <= 0:
+        return base_time
+    return base_time + (offset - 0.5) * shutter / fps
+
+
+def channel_resolution_value(ch_res) -> List[Tuple[float, float, float]]:
+    """Format iChannelResolution for moderngl's `vec3[4]` array uniform setter,
+    which expects one 3-tuple per array element (not a flat float list)."""
+    return [tuple(float(v) for v in triple) for triple in ch_res]
+
+
+def date_uniform(start_dt: datetime, time_val: float) -> Tuple[float, float, float, float]:
+    """Deterministic iDate: fixed render start datetime advanced by iTime."""
+    from datetime import timedelta
+    now = start_dt + timedelta(seconds=float(time_val))
+    seconds_of_day = now.hour * 3600 + now.minute * 60 + now.second + now.microsecond / 1e6
+    return (float(now.year), float(now.month), float(now.day), float(seconds_of_day))
+
+
+def opaque_alpha(dtype) -> float:
+    """Alpha value that image_to_float maps to 1.0 for this dtype."""
+    dtype = np.dtype(dtype)
+    if dtype.kind in ("u", "i"):
+        return np.iinfo(dtype).max
+    return 1.0
+
+
+def image_to_float(img: np.ndarray) -> np.ndarray:
+    """Convert a loaded image to float32 for upload as an f4 texture.
+
+    Integer images are normalised by their dtype max (so 16-bit PNG/TIFF map
+    to 0..1 like 8-bit ones). Float images (EXR/HDR) are left unclipped.
+    """
+    if img.dtype.kind in ("u", "i"):
+        return img.astype(np.float32) / float(np.iinfo(img.dtype).max)
+    if img.dtype == np.bool_:
+        return img.astype(np.float32)
+    return img.astype(np.float32)
+
+
+def to_output_pixels(img: np.ndarray, out_format: str, out_bit_depth: str) -> np.ndarray:
+    """Convert a float RGBA frame into the array handed to the image writer.
+
+    - exr: float16 for "16f", else float32 (unclipped).
+    - png/tif: uint8 for "8"; uint16 for any higher depth ("16", "16f", "32f").
+      Values are clipped to [0, 1] and rounded (not truncated).
+    """
+    if out_format == "exr":
+        if out_bit_depth == "16f":
+            return img.astype(np.float16)
+        return img.astype(np.float32)
+    clipped = np.clip(img, 0.0, 1.0)
+    if str(out_bit_depth) in ("8", "", "None"):
+        return np.round(clipped * 255.0).astype(np.uint8)
+    return np.round(clipped * 65535.0).astype(np.uint16)
+
+
+def tile_placement(tx: int, ty: int, tile_w: int, tile_h: int,
+                   width: int, height: int):
+    """Where tile (tx, ty) lands in a top-down numpy image.
+
+    Tiles are rendered in GL coordinates (ty=0 is the bottom row) and read
+    back flipped (tile row 0 = top). Returns None for empty edge tiles, else
+    (ny_start, ny_end, x_start, x_end, tile_row_start, valid_w) where the
+    valid tile region is tile[tile_row_start:tile_h, 0:valid_w].
+    """
+    off_x = tx * tile_w
+    off_y = ty * tile_h
+    y_end_gl = min(off_y + tile_h, height)
+    x_end = min(off_x + tile_w, width)
+    valid_h = y_end_gl - off_y
+    valid_w = x_end - off_x
+    if valid_h <= 0 or valid_w <= 0:
+        return None
+    return (height - y_end_gl, height - off_y, off_x, x_end, tile_h - valid_h, valid_w)
+
+
+def stitch_tiles_in_memory(load_tile, tiles_x: int, tiles_y: int, tile_w: int, tile_h: int,
+                           width: int, height: int) -> np.ndarray:
+    """Stitch tiles into a preallocated full-size float32 buffer."""
+    final_img = np.zeros((height, width, 4), dtype=np.float32)
+    for ty in range(tiles_y):
+        for tx in range(tiles_x):
+            place = tile_placement(tx, ty, tile_w, tile_h, width, height)
+            if place is None:
+                continue
+            ny0, ny1, x0, x1, tr0, vw = place
+            final_img[ny0:ny1, x0:x1, :] = load_tile(tx, ty)[tr0:tile_h, 0:vw, :]
+    return final_img
+
+
+def stitch_tiles_by_rows(load_tile, tiles_x: int, tiles_y: int, tile_w: int, tile_h: int,
+                         width: int, height: int) -> np.ndarray:
+    """Stitch one tile row at a time (only one row of tiles loaded at once).
+
+    Rows are assembled top-down, i.e. from the highest GL tile row to ty=0,
+    using the same placement rules as stitch_tiles_in_memory.
+    """
+    output_rows = []
+    for ty in reversed(range(tiles_y)):
+        row_parts = []
+        for tx in range(tiles_x):
+            place = tile_placement(tx, ty, tile_w, tile_h, width, height)
+            if place is None:
+                continue
+            _, _, _, _, tr0, vw = place
+            row_parts.append(np.asarray(load_tile(tx, ty), dtype=np.float32)[tr0:tile_h, 0:vw, :])
+        if row_parts:
+            output_rows.append(np.concatenate(row_parts, axis=1))
+    return np.concatenate(output_rows, axis=0)
 
 
 def _builtin_uniforms_from_eval(eval_frame) -> Dict[str, Any]:
@@ -185,6 +335,9 @@ def build_basis(forward: np.ndarray, up: np.ndarray) -> np.ndarray:
 class Renderer:
     def __init__(self, job: RenderJob):
         self.job = job
+        # Fixed reference for iDate so it is deterministic across tiles,
+        # temporal samples and frames (iDate = start + iTime).
+        self._render_start_dt = datetime.now()
         self.output_width = job.width
         self.output_height = job.height
 
@@ -240,6 +393,11 @@ class Renderer:
         # MusiCue bundle integration
         self.bundle_eval = None
         self.spectrum_synth = None
+        self.mod_eval = None
+        # @param defaults, so knobs missing from shader_parameters render at
+        # their declared default instead of 0.
+        from .modulation import job_params
+        self._param_defaults = {p["name"]: p["default"] for p in job_params(job)}
         self.bundle_mode = getattr(job, "bundle_mode", "auto")
         self.bundle_blend = getattr(job, "bundle_blend", 0.5)
         self.track_settings = getattr(job, "track_settings", {}) or {}
@@ -251,24 +409,29 @@ class Renderer:
                 override_path=getattr(job, "bundle_path", None),
             )
             if result.bundle is not None:
-                self.bundle_eval = BundleEvaluator(result.bundle, fps=job.fps)
+                self.bundle_eval = BundleEvaluator(
+                    result.bundle, fps=job.fps,
+                    av_offset_ms=getattr(job, "av_offset_ms", 0.0) or 0.0)
                 self.spectrum_synth = MusicalSpectrumSynth()
                 # Precompute per-track effective series (settings + causal
                 # smoothing) over 0..frame_end. Smoothing is stateful, so it
                 # must run from frame 0; preview mirrors this exactly.
-                from .musicue import BAND_TRACKS, _BAND_TRACK_SOURCE, apply_settings_series
-                n = int(self.job.frame_end) + 1
+                from .musicue import BAND_TRACKS, apply_settings_series, band_raw_value
+                n = self._band_series_length()
                 raw_series = {tid: [] for tid in BAND_TRACKS}
                 for fi in range(n):
                     ef = self.bundle_eval.evaluate(fi)
                     for tid in BAND_TRACKS:
-                        field, key = _BAND_TRACK_SOURCE[tid]
-                        raw_series[tid].append(float(getattr(ef, field).get(key, 0.0)))
+                        raw_series[tid].append(band_raw_value(ef, tid))
                 self._eff_band_series = {
                     tid: apply_settings_series(raw_series[tid], self.track_settings.get(tid))
                     for tid in BAND_TRACKS
                 }
                 self._eff_series_len = n
+                # Modulation matrix: routes -> @param values (None if unused).
+                from .modulation import build_job_modulation
+                self.mod_eval = build_job_modulation(
+                    job, result.bundle, duration_sec=n / job.fps + 1.0)
                 if self.bundle_mode == "auto":
                     self.bundle_mode = "cued"
             elif self.bundle_mode == "auto":
@@ -284,6 +447,15 @@ class Renderer:
         
         self._init_geometry()
         self._init_buffers()
+
+    def _resolved_frame_end(self) -> int:
+        audio_dur = self.audio.meta.duration_sec if self.audio else None
+        return resolve_frame_end(self.job.frame_start, self.job.frame_end,
+                                 self.job.fps, self.job.duration_sec, audio_dur)
+
+    def _band_series_length(self) -> int:
+        audio_dur = self.audio.meta.duration_sec if self.audio else None
+        return band_series_length(self._resolved_frame_end(), self.job.fps, audio_dur)
 
     def _init_geometry(self):
         vertices = np.array([
@@ -430,25 +602,35 @@ class Renderer:
 
         if hasattr(self, 'audio_tex_512'):
             self.audio_tex_512.release()
+            del self.audio_tex_512
 
         if self.history_tex:
             self.history_tex.release()
             self.history_tex = None
 
+        # self.textures / self.fbos alias the current feedback ping-pong
+        # objects, so release each object exactly once (by identity).
+        released = set()
+
+        def _release_once(obj):
+            if obj is None or id(obj) in released:
+                return
+            released.add(id(obj))
+            obj.release()
+
         for name, pair in self.feedback_pairs.items():
             for tex in pair.get("textures", []):
-                tex.release()
+                _release_once(tex)
             for fbo in pair.get("fbos", []):
-                fbo.release()
+                _release_once(fbo)
         self.feedback_pairs.clear()
 
         for fbo in self.fbos.values():
-            if fbo not in [f for p in self.feedback_pairs.values() for f in p.get("fbos", [])]:
-                fbo.release()
+            _release_once(fbo)
         self.fbos.clear()
 
         for tex in self.textures.values():
-            tex.release()
+            _release_once(tex)
         self.textures.clear()
 
         for vao in self.vaos.values():
@@ -493,15 +675,12 @@ class Renderer:
         if img.ndim == 2:
             img = np.stack([img] * 3, axis=-1)
         if img.shape[-1] == 3:
-            alpha = np.ones((img.shape[0], img.shape[1], 1), dtype=img.dtype)
+            alpha = np.full((img.shape[0], img.shape[1], 1), opaque_alpha(img.dtype),
+                            dtype=img.dtype)
             img = np.concatenate([img, alpha], axis=-1)
         img = np.flipud(img)
 
-        if img.dtype.kind in ("u", "i"):
-            img_f = img.astype(np.float32) / 255.0
-        else:
-            img_f = img.astype(np.float32)
-            img_f = np.clip(img_f, 0.0, 1.0)
+        img_f = np.ascontiguousarray(image_to_float(img))
 
         tex = self.ctx.texture((img_f.shape[1], img_f.shape[0]), img_f.shape[-1], data=img_f.tobytes(), dtype="f4")
         tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
@@ -512,14 +691,7 @@ class Renderer:
 
     def render(self):
         start = self.job.frame_start
-        end = self.job.frame_end
-        if end <= start and self.job.fps > 0:
-            duration = self.job.duration_sec
-            if (duration is None or duration <= 0) and self.audio:
-                duration = self.audio.meta.duration_sec
-            if duration is None or duration <= 0:
-                duration = 0.0
-            end = start + int(round(duration * self.job.fps))
+        end = self._resolved_frame_end()
 
         out_path = Path(self.job.output_dir)
         out_path.mkdir(parents=True, exist_ok=True)
@@ -590,7 +762,11 @@ class Renderer:
         # ~20–40% file-size penalty.
         ext, write_kwargs = _writer_kwargs_for_format(fmt, self.job.png_compress_level)
         out_file = resolve_output_path(out_dir, self.job.output_pattern, frame_idx, ext)
-        iio.imwrite(out_file, img_data, **write_kwargs)
+        if img_data.dtype == np.uint16 and fmt in ("png", "tif", "tif_lzw"):
+            # Pillow can't encode 16-bit RGBA; use the built-in encoders.
+            write_image16(out_file, img_data, fmt, self.job.png_compress_level)
+        else:
+            iio.imwrite(out_file, img_data, **write_kwargs)
 
         print(f"Frame {frame_idx} saved to {out_file.name}")
 
@@ -639,52 +815,11 @@ class Renderer:
         print(f"[LOG] _stitch_tiles_disk_streaming: Stitching {tiles_x}x{tiles_y} tiles with minimal memory...",
               file=sys.stderr, flush=True)
         
-        # Build output row-by-row
-        output_rows = []
-        
-        for row_y in range(tiles_y):
-            # Load all tiles in this row
-            row_tiles = []
-            for tile_x in range(tiles_x):
-                tile_path = tile_files[(tile_x, row_y)]
-                tile_data = np.load(tile_path)
-                row_tiles.append(tile_data)
-            
-            # Concatenate tiles horizontally for this row
-            # Handle edge tiles that might be smaller
-            row_height = row_tiles[0].shape[0]
-            row_parts = []
-            
-            for tx, tile in enumerate(row_tiles):
-                off_x = tx * self.tile_w
-                x_end = min(off_x + self.tile_w, self.internal_width)
-                valid_w = x_end - off_x
-                
-                # Extract valid region from this tile
-                if valid_w < tile.shape[1]:
-                    row_parts.append(tile[:, :valid_w, :])
-                else:
-                    row_parts.append(tile)
-            
-            # Concatenate horizontally
-            row_data = np.concatenate(row_parts, axis=1)
-            output_rows.append(row_data)
-        
-        # Stack rows vertically
-        # Handle edge rows that might be smaller
-        final_parts = []
-        for ty, row in enumerate(output_rows):
-            off_y = ty * self.tile_h
-            y_end_gl = min(off_y + self.tile_h, self.internal_height)
-            valid_h = y_end_gl - off_y
-            
-            if valid_h < row.shape[0]:
-                final_parts.append(row[:valid_h, :, :])
-            else:
-                final_parts.append(row)
-        
-        final_img = np.concatenate(final_parts, axis=0)
-        
+        final_img = stitch_tiles_by_rows(
+            lambda tx, ty: np.load(tile_files[(tx, ty)]),
+            tiles_x, tiles_y, self.tile_w, self.tile_h,
+            self.internal_width, self.internal_height)
+
         print(f"[LOG] _stitch_tiles_disk_streaming: Stitched to {final_img.shape[0]}x{final_img.shape[1]}",
               file=sys.stderr, flush=True)
         
@@ -759,7 +894,7 @@ class Renderer:
 
                 # Render all temporal samples for this tile
                 for sample_idx, offset in enumerate(offsets):
-                    time_val = base_time + (offset - 0.5) * self.job.shutter
+                    time_val = sample_time(base_time, offset, self.job.shutter, self.job.fps)
 
                     # Render dependencies (these don't change per tile, but we need them per sample)
                     # TODO: Optimize by caching dependency buffers if they don't use tiling
@@ -843,38 +978,10 @@ class Renderer:
         if use_disk_streaming:
             final_img = self._stitch_tiles_disk_streaming(tile_files, tiles_x, tiles_y, out_format, out_bit_depth)
         else:
-            # Original memory-based stitching
-            final_img = np.zeros((self.internal_height, self.internal_width, 4), dtype=np.float32)
-
-            for ty in range(tiles_y):
-                for tx in range(tiles_x):
-                    tile_path = tile_files[(tx, ty)]
-                    tile_data = np.load(tile_path)
-
-                    off_x = tx * self.tile_w
-                    off_y = ty * self.tile_h
-
-                    # Calculate valid region (handle edge tiles)
-                    y_start_gl = off_y
-                    y_end_gl = min(off_y + self.tile_h, self.internal_height)
-                    x_start = off_x
-                    x_end = min(off_x + self.tile_w, self.internal_width)
-
-                    valid_h = y_end_gl - y_start_gl
-                    valid_w = x_end - x_start
-
-                    if valid_h <= 0 or valid_w <= 0:
-                        continue
-
-                    # Convert GL coords to numpy coords
-                    ny_start = self.internal_height - y_end_gl
-                    ny_end = self.internal_height - y_start_gl
-
-                    # Extract valid region from tile
-                    tile_slice = tile_data[self.tile_h - valid_h:self.tile_h, 0:valid_w, :]
-
-                    # Place in final image
-                    final_img[ny_start:ny_end, x_start:x_end, :] = tile_slice
+            final_img = stitch_tiles_in_memory(
+                lambda tx, ty: np.load(tile_files[(tx, ty)]),
+                tiles_x, tiles_y, self.tile_w, self.tile_h,
+                self.internal_width, self.internal_height)
 
         # Clean up temp files
         import shutil
@@ -898,12 +1005,7 @@ class Renderer:
         print(f"[LOG] _render_view_streaming: Total time: {view_elapsed:.2f}s", file=sys.stderr, flush=True)
 
         # Convert to output format
-        if out_format == "exr":
-            if out_bit_depth == "16f":
-                return final_img.astype(np.float16)
-            return final_img.astype(np.float32)
-        final_img = np.clip(final_img, 0.0, 1.0) * 255.0
-        return final_img.astype(np.uint8)
+        return to_output_pixels(final_img, out_format, out_bit_depth)
 
     def _render_view_standard(self, frame_idx: int, eye: str, out_format: str, out_bit_depth: str,
                               view_start_time: float) -> np.ndarray:
@@ -950,7 +1052,7 @@ class Renderer:
         numpy_dtype = np.float32 if gpu_dtype == 'f4' else np.float16
 
         for sample_idx, offset in enumerate(offsets):
-            time_val = base_time + (offset - 0.5) * self.job.shutter
+            time_val = sample_time(base_time, offset, self.job.shutter, self.job.fps)
 
             # Render dependencies
             for buf_name in order:
@@ -972,22 +1074,12 @@ class Renderer:
                     tile_data = np.frombuffer(raw_bytes, dtype=numpy_dtype).reshape((self.tile_h, self.tile_w, 4))
                     tile_data = np.flipud(tile_data)
 
-                    # Calculate placement
-                    y_start_gl = off_y
-                    y_end_gl = min(off_y + self.tile_h, self.internal_height)
-                    x_start = off_x
-                    x_end = min(off_x + self.tile_w, self.internal_width)
-
-                    valid_h = y_end_gl - y_start_gl
-                    valid_w = x_end - x_start
-
-                    if valid_h <= 0 or valid_w <= 0:
+                    place = tile_placement(tx, ty, self.tile_w, self.tile_h,
+                                           self.internal_width, self.internal_height)
+                    if place is None:
                         continue
-
-                    ny_start = self.internal_height - y_end_gl
-                    ny_end = self.internal_height - y_start_gl
-
-                    tile_slice = tile_data[self.tile_h - valid_h:self.tile_h, 0:valid_w, :]
+                    ny_start, ny_end, x_start, x_end, tr0, valid_w = place
+                    tile_slice = tile_data[tr0:self.tile_h, 0:valid_w, :]
                     acc_buffer[ny_start:ny_end, x_start:x_end, :] += tile_slice.astype(np.float32)
 
         # Average
@@ -1007,12 +1099,7 @@ class Renderer:
         view_elapsed = time_module.time() - view_start_time
         print(f"[LOG] _render_view_standard: Total time: {view_elapsed:.2f}s", file=sys.stderr, flush=True)
 
-        if out_format == "exr":
-            if out_bit_depth == "16f":
-                return avg.astype(np.float16)
-            return avg.astype(np.float32)
-        avg = np.clip(avg, 0.0, 1.0) * 255.0
-        return avg.astype(np.uint8)
+        return to_output_pixels(avg, out_format, out_bit_depth)
             
     def _render_pass(self, buf_name: str, time_val: float, frame_idx: int, sample_idx: int,
                      cam_pos: np.ndarray, cam_dir: np.ndarray, cam_up: np.ndarray,
@@ -1050,14 +1137,16 @@ class Renderer:
             'iCameraUp': tuple(cam_up),
         }
         
-        # Inject custom shader parameters
+        # Inject custom shader parameters (declared defaults, then overrides,
+        # then modulation-matrix values at this temporal sample's time).
+        uni.update(self._param_defaults)
         for k, v in self.job.shader_parameters.items():
             uni[k] = v
+        if self.mod_eval is not None:
+            uni.update(self.mod_eval.evaluate_at(time_val))
 
         # Standard Shadertoy time/date uniforms
-        now = datetime.now()
-        seconds_of_day = now.hour * 3600 + now.minute * 60 + now.second + now.microsecond / 1e6
-        uni['iDate'] = (now.year, now.month, now.day, seconds_of_day)
+        uni['iDate'] = date_uniform(self._render_start_dt, time_val)
 
         duration_uniform = self.job.duration_sec
         if (duration_uniform is None or duration_uniform <= 0) and self.audio:
@@ -1068,20 +1157,22 @@ class Renderer:
         ch_time = [0.0, 0.0, 0.0, 0.0]
         ch_res = [(0.0, 0.0, 0.0)] * 4
 
-        eval_frame = None
         if self.audio:
             uni['iSampleRate'] = float(self.audio.meta.sample_rate)
             if self.job.audio_mode in ("shadertoy", "both"):
                 raw_aud = self.audio.get_shadertoy_texture(frame_idx)
                 if self.bundle_eval is not None and self.spectrum_synth is not None:
-                    eval_frame = self.bundle_eval.evaluate(frame_idx)
+                    # iChannel0 stays per-frame: its band series is
+                    # precomputed with stateful smoothing and shared with
+                    # the preview, so it must be indexed by frame.
+                    tex_frame = self.bundle_eval.evaluate(frame_idx)
                     from .musicue import BAND_TRACKS
-                    idx = min(frame_idx, self._eff_series_len - 1)
+                    idx = max(0, min(frame_idx, self._eff_series_len - 1))
                     band_values = {tid: self._eff_band_series[tid][idx]
                                    for tid in BAND_TRACKS}
                     cued_aud = self.spectrum_synth.synthesize_effective(
-                        band_values, eval_frame.section_energy,
-                        eval_frame.beat_phase, eval_frame.global_energy)
+                        band_values, tex_frame.section_energy,
+                        tex_frame.beat_phase, tex_frame.global_energy)
                     aud_data = _mix_audio_textures(
                         raw_aud, cued_aud, self.bundle_mode, self.bundle_blend,
                     )
@@ -1093,9 +1184,13 @@ class Renderer:
         else:
             uni['iSampleRate'] = 0.0
 
-        # Built-in cuesheet/bundle uniforms (Phase 1), with per-track mutes applied.
-        from .musicue import masked_builtin_uniforms
-        uni.update(masked_builtin_uniforms(eval_frame, self.track_settings))
+        # Scalar bundle uniforms (Phase-1 six + musical signals), with
+        # per-track settings applied. Evaluated at this temporal sample's
+        # time so motion-blur samples see the right beat/envelope values.
+        from .musicue import bundle_uniforms
+        eval_frame = (self.bundle_eval.evaluate_at(time_val)
+                      if self.bundle_eval is not None else None)
+        uni.update(bundle_uniforms(eval_frame, self.track_settings, time_val))
 
         if self.history_tex:
             self.history_tex.use(location=4)
@@ -1158,7 +1253,7 @@ class Renderer:
                 uni[f'iChannel{unit}'] = unit
 
         uni['iChannelTime'] = tuple(ch_time)
-        uni['iChannelResolution'] = tuple(v for triple in ch_res for v in triple)
+        uni['iChannelResolution'] = channel_resolution_value(ch_res)
 
         self._bind_uniforms(prog, uni)
         self.vaos[buf_name].render(moderngl.TRIANGLE_STRIP)

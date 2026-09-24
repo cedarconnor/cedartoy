@@ -1,4 +1,5 @@
 import { AudioTexture } from './audio-texture.js';
+import { MUSICAL_UNIFORMS, NO_NEXT_SECTION } from './cue-compose.js';
 
 export class ShaderRenderer {
     constructor(canvas) {
@@ -25,7 +26,7 @@ export class ShaderRenderer {
 
         // MusiCue bundle uniforms — updated each transport-frame by preview-panel.
         // All zeros when no bundle / no audio is playing.
-        this.bundleUniforms = { bpm: 0, beat: 0, bar: 0, energy: 0, sectionEnergy: 0, sectionId: 0 };
+        this.bundleUniforms = this._defaultBundleUniforms();
 
         // @param-declared shader uniforms. Populated by compileShader from
         // `// @param name type default min max "label"` lines in the source.
@@ -33,6 +34,10 @@ export class ShaderRenderer {
         // shaderParamValues so setShaderParameters() can override per-frame.
         this.shaderParams = [];
         this.shaderParamValues = {};
+        // Modulation-matrix values ({param: value}) for the current transport
+        // time, set by preview-panel from /api/modulation/series. They
+        // override shaderParamValues at bind time without replacing them.
+        this.paramOverrides = null;
 
         // Mouse tracking for iMouse uniform
         this.mouseX = 0;
@@ -90,17 +95,26 @@ export class ShaderRenderer {
         }
     }
 
+    /** No-bundle values: zeros, "no next section", and iMusicTime = null
+     * (bound as iTime at draw time so shaders using it as an iTime
+     * replacement keep moving). Mirrors musicue.py::masked_musical_uniforms. */
+    _defaultBundleUniforms() {
+        const out = { bpm: 0, beat: 0, bar: 0, energy: 0, sectionEnergy: 0, sectionId: 0 };
+        for (const [name, key] of MUSICAL_UNIFORMS) {
+            out[key] = name === 'iTimeToNextSection' ? NO_NEXT_SECTION : 0;
+        }
+        out.musicTime = null;
+        return out;
+    }
+
     /** Update the cached MusiCue bundle uniforms. Called per frame by preview-panel. */
     updateBundleUniforms(u) {
         if (!u) return;
-        this.bundleUniforms = {
-            bpm: u.bpm || 0,
-            beat: u.beat || 0,
-            bar: u.bar || 0,
-            energy: u.energy || 0,
-            sectionEnergy: u.sectionEnergy || 0,
-            sectionId: u.sectionId || 0,
-        };
+        const out = this._defaultBundleUniforms();
+        for (const k of Object.keys(out)) {
+            if (u[k] !== undefined && u[k] !== null) out[k] = u[k];
+        }
+        this.bundleUniforms = out;
     }
 
     compileShader(source) {
@@ -181,6 +195,10 @@ export class ShaderRenderer {
             iSectionId: gl.getUniformLocation(this.program, 'iSectionId'),
             iEnergy: gl.getUniformLocation(this.program, 'iEnergy'),
         };
+        // Musical-structure bundle uniforms (iBeatClock, iKick, iMusicTime, ...).
+        for (const [name] of MUSICAL_UNIFORMS) {
+            this.uniforms[name] = gl.getUniformLocation(this.program, name);
+        }
 
         // Get array uniform locations
         this.uniforms.iChannelTime = [];
@@ -235,6 +253,10 @@ export class ShaderRenderer {
         cleanSource = cleanSource.replace(/uniform\s+float\s+iSectionEnergy\s*;/g, '');
         cleanSource = cleanSource.replace(/uniform\s+int\s+iSectionId\s*;/g, '');
         cleanSource = cleanSource.replace(/uniform\s+float\s+iEnergy\s*;/g, '');
+        for (const [name] of MUSICAL_UNIFORMS) {
+            cleanSource = cleanSource.replace(
+                new RegExp(`uniform\\s+float\\s+${name}\\s*;`, 'g'), '');
+        }
         // CedarToy camera/jitter uniforms — same reasoning.
         cleanSource = cleanSource.replace(/uniform\s+int\s+iCameraMode\s*;/g, '');
         cleanSource = cleanSource.replace(/uniform\s+float\s+iCameraTiltDeg\s*;/g, '');
@@ -275,7 +297,11 @@ export class ShaderRenderer {
         finalShader += 'uniform int   iBar;\n';
         finalShader += 'uniform float iSectionEnergy;\n';
         finalShader += 'uniform int   iSectionId;\n';
-        finalShader += 'uniform float iEnergy;\n\n';
+        finalShader += 'uniform float iEnergy;\n';
+        for (const [name] of MUSICAL_UNIFORMS) {
+            finalShader += `uniform float ${name};\n`;
+        }
+        finalShader += '\n';
         finalShader += 'out vec4 fragColor;\n\n';
 
         // Add CedarToy camera helper functions
@@ -443,22 +469,31 @@ vec3 cameraDirLL180(vec2 uv, float tiltDeg, mat3 camBasis) {
         }
 
         // MusiCue bundle uniforms (set from the most recent transport-frame).
-        const bu = this.bundleUniforms || { bpm: 0, beat: 0, bar: 0, energy: 0, sectionEnergy: 0 };
+        const bu = this.bundleUniforms || this._defaultBundleUniforms();
         if (this.uniforms.iBpm !== null) gl.uniform1f(this.uniforms.iBpm, bu.bpm);
         if (this.uniforms.iBeat !== null) gl.uniform1f(this.uniforms.iBeat, bu.beat);
         if (this.uniforms.iBar !== null) gl.uniform1i(this.uniforms.iBar, bu.bar | 0);
         if (this.uniforms.iSectionEnergy !== null) gl.uniform1f(this.uniforms.iSectionEnergy, bu.sectionEnergy);
         if (this.uniforms.iSectionId !== null) gl.uniform1i(this.uniforms.iSectionId, bu.sectionId | 0);
         if (this.uniforms.iEnergy !== null) gl.uniform1f(this.uniforms.iEnergy, bu.energy);
+        for (const [name, key] of MUSICAL_UNIFORMS) {
+            const loc = this.uniforms[name];
+            if (loc === null || loc === undefined) continue;
+            let v = bu[key];
+            if (name === 'iMusicTime' && (v === null || v === undefined)) v = this.currentTime;
+            gl.uniform1f(loc, +v || 0);
+        }
 
         // @param uniforms — keeps shaders that drive motion off these (e.g.
         // `iTime * pulse_speed`) from freezing when the param isn't otherwise
         // set. Headless render binds the same values via the job's
         // shader_parameters dict; preview now matches.
+        const ov = this.paramOverrides;
         for (const p of this.shaderParams) {
             const loc = this.uniforms[p.name];
             if (loc === null) continue;
-            const v = this.shaderParamValues[p.name];
+            const v = (ov && p.type === 'float' && ov[p.name] !== undefined)
+                ? ov[p.name] : this.shaderParamValues[p.name];
             if (p.type === 'int') gl.uniform1i(loc, v | 0);
             else gl.uniform1f(loc, +v);
         }

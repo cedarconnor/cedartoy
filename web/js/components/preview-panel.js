@@ -1,5 +1,6 @@
 import { api } from '../api.js';
-import { ShaderRenderer } from '../webgl/renderer.js?v=4';
+import { ShaderRenderer } from '../webgl/renderer.js?v=6';
+import { modulatedValuesAt } from '../webgl/modulation-bind.js?v=1';
 import { composeRow1, composeUniforms, effectiveSettings,
     applySettingsSeries, composeRow0FromValues }
     from '../webgl/cue-compose.js';
@@ -16,6 +17,7 @@ class PreviewPanel extends HTMLElement {
         this._effSettings = {};      // effective per-track settings (mask)
         this._effSeries = {};        // per-track effective per-frame series
         this._timelineFps = 24.0;
+        this._modSeries = null;      // /api/modulation/series payload
     }
 
     connectedCallback() {
@@ -48,8 +50,10 @@ class PreviewPanel extends HTMLElement {
             this._timeline = null;
             if (!audio) return;
             try {
+                const ce = document.querySelector('config-editor');
+                const avOff = (ce && ce.config && +ce.config.av_offset_ms) || 0;
                 const r = await fetch('/api/reactivity/track-timeline?audio='
-                    + encodeURIComponent(audio));
+                    + encodeURIComponent(audio) + '&av_offset_ms=' + avOff);
                 if (r.ok) {
                     this._timeline = await r.json();
                     this._timelineFps = this._timeline.fps || 24.0;
@@ -68,6 +72,14 @@ class PreviewPanel extends HTMLElement {
             if (this.renderer) this._composeAndRender(this.renderer.currentTime || 0);
         });
 
+        // Modulation matrix: per-frame @param values computed server-side.
+        document.addEventListener('modulation-series', (e) => {
+            this._modSeries = e.detail || null;
+            if (!this.renderer) return;
+            this._applyModulation(this.renderer.currentTime || 0);
+            if (this.useAudioTimeline) this.renderer.render();
+        });
+
         // Transport-strip drives time only when preview is connected to it.
         document.addEventListener('transport-frame', (e) => {
             if (!this.useAudioTimeline) return;
@@ -78,6 +90,7 @@ class PreviewPanel extends HTMLElement {
                 this._composeAndRender(t);
             } else {
                 if (e.detail.bundle) this.renderer.updateBundleUniforms(e.detail.bundle);
+                this._applyModulation(t);
                 this.renderer.render();
             }
         });
@@ -211,6 +224,7 @@ class PreviewPanel extends HTMLElement {
 
         this.renderer.updateAudioData(this._zeroFft, this._zeroWaveform);
         this.renderer.updateBundleUniforms({});
+        this.renderer.paramOverrides = null;   // free run: base @param values
         if (!this.renderer.playing) {
             this.renderer.play();
         }
@@ -237,8 +251,17 @@ class PreviewPanel extends HTMLElement {
         const row1 = composeRow1(tl.frame_data, f);
         this.renderer.updateAudioData(row0, row1);
         this.renderer.updateBundleUniforms(composeUniforms(tl.frame_data, f, this._effSettings));
+        this._applyModulation(t);
         this.renderer.render();
         this._emitCueFrame(f, t);
+    }
+
+    /** Bind modulated @param values at transport time t (timeline mode only;
+     * free run keeps the base slider values). */
+    _applyModulation(t) {
+        if (!this.renderer) return;
+        this.renderer.paramOverrides = (this.useAudioTimeline && this._modSeries)
+            ? modulatedValuesAt(this._modSeries, t) : null;
     }
 
     _emitCueFrame(f, t) {

@@ -11,6 +11,9 @@
  * Subscribes to:
  *   - shader-compile-result {ok, log, path}: from preview-panel after
  *     every WebGL compile attempt.
+ *   - prompt-kind-change {kind}: config-editor copied a "reactive" or
+ *     "knobs" (Expose knobs) prompt; Apply writes <stem>_<kind>.glsl and
+ *     the fix-it prompt is worded for that kind.
  */
 class ShaderReactivityDrawer extends HTMLElement {
     constructor() {
@@ -19,12 +22,16 @@ class ShaderReactivityDrawer extends HTMLElement {
         this._lastGlLog = '';
         this._lastAppliedPath = '';     // the _reactive.glsl path we just wrote
         this._lastBrokenGlsl = '';      // the GLSL we extracted from the paste
+        this._kind = 'reactive';        // 'reactive' | 'knobs' (last prompt copied)
     }
 
     connectedCallback() {
         this.render();
         this._attach();
         document.addEventListener('shader-compile-result', (e) => this._onCompile(e.detail));
+        document.addEventListener('prompt-kind-change', (e) => {
+            this._kind = e.detail && e.detail.kind === 'knobs' ? 'knobs' : 'reactive';
+        });
     }
 
     render() {
@@ -84,7 +91,7 @@ class ShaderReactivityDrawer extends HTMLElement {
             const r = await fetch('/api/shader/apply', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ base, glsl, mode }),
+                body: JSON.stringify({ base, glsl, mode, kind: this._kind }),
             });
             if (!r.ok) {
                 const detail = await r.json().catch(() => ({}));
@@ -134,9 +141,9 @@ class ShaderReactivityDrawer extends HTMLElement {
             this._setStatus('error', 'Apply a shader first.');
             return;
         }
-        // Resolve the *original* base (strip _reactive suffix if user re-applied
-        // over the sibling — we want the pristine original).
-        const baseClean = base.replace(/_reactive\.glsl$/i, '.glsl');
+        // Resolve the *original* base (strip _reactive/_knobs suffix if user
+        // re-applied over the sibling — we want the pristine original).
+        const baseClean = base.replace(/_(reactive|knobs)\.glsl$/i, '.glsl');
         try {
             const r = await fetch('/api/reactivity/fixit-prompt', {
                 method: 'POST',
@@ -145,6 +152,7 @@ class ShaderReactivityDrawer extends HTMLElement {
                     base: baseClean,
                     broken_glsl: this._lastBrokenGlsl,
                     gl_log: this._lastGlLog,
+                    kind: this._kind,
                 }),
             });
             if (!r.ok) {

@@ -24,6 +24,37 @@ def _validate_config_path(filepath: str) -> Path:
             detail=f"Config files must be within project directory: {_PROJECT_ROOT}"
         )
 
+_CONFIGS_DIR = _PROJECT_ROOT / "configs"
+_CONFIG_SAVE_EXTENSIONS = {".yaml", ".yml"}
+
+
+def _validate_config_save_path(filepath: str) -> Path:
+    """Resolve a save target: a .yaml/.yml file inside the configs dir.
+
+    Relative paths are taken relative to configs/ (a leading "configs/" is
+    accepted too); absolute paths must already point inside configs/.
+    """
+    raw = Path(filepath)
+    if raw.suffix.lower() not in _CONFIG_SAVE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Config files must be .yaml or .yml")
+    configs_dir = _CONFIGS_DIR.resolve()
+    if raw.is_absolute():
+        path = raw.resolve()
+    else:
+        parts = raw.parts
+        if parts and parts[0] == "configs":
+            raw = Path(*parts[1:])
+        path = (configs_dir / raw).resolve()
+    try:
+        path.relative_to(configs_dir)
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Config files can only be saved inside {configs_dir}",
+        )
+    return path
+
+
 class ConfigData(BaseModel):
     config: Dict[str, Any]
 
@@ -60,8 +91,8 @@ async def get_defaults():
 
 @router.post("/save")
 async def save_config(data: ConfigData, filepath: str = "cedartoy.yaml"):
-    """Save configuration to YAML file (within project directory only)"""
-    path = _validate_config_path(filepath)
+    """Save configuration to a YAML file inside the configs/ directory."""
+    path = _validate_config_save_path(filepath)
 
     try:
         # Ensure parent directory exists

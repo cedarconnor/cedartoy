@@ -13,8 +13,34 @@ export const BAND_RANGES = {
 export const BAND_TRACKS = {
     "drums.kick": "low", "drums.snare": "low_mid", "drums.tom": "low_mid",
     "drums.hat": "mid_hi", "drums.cymbal": "mid_hi", "drums.other": "mid_hi",
-    "stem.vocals": "high", "stem.other": "high", "stem.bass": "high",
+    "stem.vocals": "high", "stem.other": "high", "stem.bass": "low",
 };
+
+// iTimeToNextSection when there is no upcoming section / sections muted.
+// Mirrors cedartoy/musicue.py::NO_NEXT_SECTION.
+export const NO_NEXT_SECTION = 1000.0;
+
+// Musical uniforms: [uniform name, frame_data.uniforms key, mask track, how].
+// how: "mute" = zero on mute only; "setting" = applySetting (threshold/gain/
+// mute); null track = unmasked. Mirrors musicue.py::_MUSICAL_MASK exactly.
+export const MUSICAL_UNIFORMS = [
+    ["iBeatClock", "beatClock", "tempo", "mute"],
+    ["iBarPhase", "barPhase", "tempo", "mute"],
+    ["iPhrasePhase", "phrasePhase", "tempo", "mute"],
+    ["iSectionProgress", "sectionProgress", "sections", "mute"],
+    ["iTimeToNextSection", "timeToNextSection", "sections", "mute"],
+    ["iBuild", "build", null, null],
+    ["iKick", "kick", "drums.kick", "setting"],
+    ["iSnare", "snare", "drums.snare", "setting"],
+    ["iHat", "hat", "drums.hat", "setting"],
+    ["iBass", "bass", "stem.bass", "setting"],
+    ["iVocals", "vocals", "stem.vocals", "setting"],
+    ["iDrums", "drums", null, null],
+    ["iOther", "other", "stem.other", "setting"],
+    ["iBrightness", "brightness", null, null],
+    ["iEnergyFast", "energyFast", "energy", "setting"],
+    ["iMusicTime", "musicTime", null, null],
+];
 
 // Hann window of given width (matches numpy.hanning: 0 at both ends).
 function hann(width) {
@@ -116,12 +142,14 @@ export function composeRow1(frameData, f) {
     return row1;
 }
 
-// Masked scalar uniforms for frame f.
+// Masked scalar uniforms for frame f. Keys: the Phase-1 six under their
+// series names (bpm, beat, ...) plus every MUSICAL_UNIFORMS series key
+// (beatClock, kick, musicTime, ...). Mirrors musicue.py::bundle_uniforms.
 export function composeUniforms(frameData, f, effSettings) {
     const u = frameData.uniforms;
     const tempoOff = !!(effSettings["tempo"] && effSettings["tempo"].mute);
     const secOff = !!(effSettings["sections"] && effSettings["sections"].mute);
-    return {
+    const out = {
         bpm: tempoOff ? 0.0 : u.bpm[f],
         beat: tempoOff ? 0.0 : u.beat[f],
         bar: tempoOff ? 0 : u.bar[f],
@@ -130,4 +158,23 @@ export function composeUniforms(frameData, f, effSettings) {
         sectionId: secOff ? 0 : u.sectionId[f],
         energy: applySetting(u.energy[f], effSettings["energy"]),
     };
+    for (const [name, key, track, how] of MUSICAL_UNIFORMS) {
+        const arr = u[key];
+        // Older timelines (pre musical uniforms) lack the series: treat as
+        // no-bundle values (0, "no next section", iMusicTime left unset so
+        // the renderer falls back to iTime).
+        if (!arr) {
+            if (name === "iTimeToNextSection") out[key] = NO_NEXT_SECTION;
+            else if (name !== "iMusicTime") out[key] = 0.0;
+            continue;
+        }
+        let v = arr[f];
+        if (track) {
+            const s = effSettings[track];
+            if (s && s.mute) v = name === "iTimeToNextSection" ? NO_NEXT_SECTION : 0.0;
+            else if (how === "setting") v = applySetting(v, s);
+        }
+        out[key] = v;
+    }
+    return out;
 }

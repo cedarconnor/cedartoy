@@ -1,7 +1,9 @@
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .modulation import Route
 
 
 CameraMode = Literal["2d", "equirect", "ll180"]
@@ -59,6 +61,9 @@ class CedarToyConfig(BaseModel):
     bundle_path: Optional[Path] = None
     bundle_mode: BundleMode = "auto"
     bundle_blend: float = 0.5
+    # Global audio/visual offset for all MusiCue bundle evaluation, in ms.
+    # Positive = visuals land later than the music analysis says.
+    av_offset_ms: float = 0.0
     camera_mode: CameraMode = "2d"
     camera_stereo: StereoMode = "none"
     camera_fov: float = 90.0
@@ -69,6 +74,9 @@ class CedarToyConfig(BaseModel):
     disk_streaming: Optional[bool] = None
     shader_parameters: Dict[str, Any] = Field(default_factory=dict)
     track_settings: Dict[str, TrackSetting] = Field(default_factory=dict)
+    # Modulation matrix routes. None = use the shader's `// @mod` defaults;
+    # a list (even empty) replaces them.
+    modulation_routes: Optional[List[Route]] = None
     channels: Optional[Dict[int, str]] = None
     iChannel_paths: Optional[Dict[int, str]] = None
     multipass: Optional[Dict[str, Any]] = None

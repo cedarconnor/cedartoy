@@ -20,6 +20,10 @@ python -m cedartoy.cli ui
 ```
 
 Open <http://localhost:8080>. The UI opens on **Stage 1 — Project**.
+The server listens on 127.0.0.1 only; pass `--host 0.0.0.0` to `ui` to
+expose it on your network (it can read and write local files).
+
+Tests: `pip install -r requirements-dev.txt && python -m pytest -q`.
 
 ---
 
@@ -134,6 +138,25 @@ Each lane has **M**(ute) and **S**(olo) buttons and draws its data in its native
 
 **A/B comparison grid.** The **A/B** toggle splits the preview into four synchronized panels — **raw FFT**, **cued** (bundle), **blend**, and **no-audio** — same shader, same playhead — so you can see at a glance whether the MusiCue data is helping or hiding the music.
 
+### Reactivity scorecard
+
+A number for "does it actually follow the music?". The scorecard reads rendered frames (PNG/TIFF/EXR, box-filtered down to ≤ 256 px wide) and measures three visual features per frame — **brightness** (mean luminance), **motion** (mean frame-to-frame difference) and **hue** shift — then correlates each with every musical signal the render used (`iKick`, `iHat`, `iEnergy`, `iBuild`, `iBarPhase`, … plus beat/downbeat pulses; post-mute/calibration, with your A/V offset). Onset-like sources are also scored on their rising edges. For each source it reports the best Pearson *r* within ±3 frames and its lag (negative = the visuals lag the audio). It also reports **jitter** (share of motion in bursts with no beat or onset within ±2 frames: visuals twitching without musical cause) and a **loud vs quiet** check (do quiet passages look calmer than loud ones?).
+
+```
+Reactivity scorecard (2880 frames, bundle signals)
+  kick → motion r=0.71 (lag 0)
+  energy → brightness r=0.55 (lag -1)
+  hats: no visible effect
+  jitter 0.32: high
+  loud vs quiet: motion ×2.4, brightness +0.12 — loud passages hit harder
+```
+
+- **Validate mode:** **Score reactivity** renders a fast 512×256 proxy of the current config on the server, scores it, and shows the summary plus a per-source bar list (best |r|, colored by brightness / motion / hue).
+- **CLI, existing frames:** `python -m cedartoy.cli scorecard renders/test --audio my_song/song.wav --fps 30 [--bundle b.json] [--av-offset-ms 40] [--json score.json]`
+- **CLI, render + score:** add `--scorecard` to any `render` command to render the 512×256 proxy (1 temporal sample, no supersampling or tiling) to a temp dir and score it instead of doing the full render.
+
+Without a MusiCue bundle the only source is the audio's RMS level (a rough proxy); with neither bundle nor audio the scorecard refuses to run.
+
 ---
 
 ## MusiCue integration
@@ -170,7 +193,7 @@ musicue export-bundle my_music.mp3
 
 ### Bundle-aware shader uniforms
 
-CedarToy binds six uniforms whenever a bundle is loaded. Declaring any of them in your GLSL opts the shader into bundle-aware reactivity:
+CedarToy binds these uniforms whenever a bundle is loaded. Declaring any of them in your GLSL opts the shader into bundle-aware reactivity:
 
 ```glsl
 uniform float iBpm;            // current BPM
@@ -179,9 +202,38 @@ uniform int   iBar;            // 0-indexed bar number
 uniform float iSectionEnergy;  // [0,1] energy rank of current section
 uniform int   iSectionId;      // stable per-label section id (verse=0, chorus=1, …)
 uniform float iEnergy;         // [0,1] global energy at this moment
+
+// Musical-structure uniforms (bundle schema 1.3; older bundles degrade:
+// missing controls/stems read 0, clocks come from beats/bpm).
+uniform float iBeatClock;         // continuous beat count from the real beat grid
+                                  //   (monotonic, phase-locked; use for smooth motion)
+uniform float iBarPhase;          // [0,1) position within the bar (from downbeats)
+uniform float iPhrasePhase;       // [0,1) position within the phrase (else 4-bar groups)
+uniform float iSectionProgress;   // [0,1] position within the current section
+uniform float iTimeToNextSection; // seconds until the next section (1000 if none)
+uniform float iBuild;             // [0,1] anticipation ramp into a drop; 0 at the drop
+uniform float iKick;              // [0,1] kick envelope (decays ~10% in half a beat)
+uniform float iSnare;             // [0,1] snare envelope
+uniform float iHat;               // [0,1] hi-hat envelope
+uniform float iBass;              // [0,1] bass stem loudness (0 without stems)
+uniform float iVocals;            // [0,1] vocal stem loudness
+uniform float iDrums;             // [0,1] drum stem loudness
+uniform float iOther;             // [0,1] other stem loudness
+uniform float iBrightness;        // [0,1] spectral brightness of the mix
+uniform float iEnergyFast;        // [0,1] short-window loudness (fallback iEnergy)
+uniform float iMusicTime;         // seconds; iTime that runs faster when loud,
+                                  //   slower when quiet (mean rate 1). Use it
+                                  //   instead of iTime for flow speed.
 ```
 
-These six uniforms — plus the bundle-synthesized `iChannel0` texture — are exactly what Validate mode lets you mute, solo, and calibrate per track.
+Scalar uniforms are evaluated at each temporal sample's time, so motion
+blur sees the right values. `av_offset_ms` (config / UI) shifts every
+bundle signal in time; positive = visuals later. Without a bundle all of
+them are 0 except `iTimeToNextSection` (1000) and `iMusicTime` (= `iTime`).
+See `shaders/musical_demo.glsl` for a showcase and
+`docs/reactivity/REACTIVITY_COOKBOOK.md` for idioms.
+
+These uniforms — plus the bundle-synthesized `iChannel0` texture — are exactly what Validate mode lets you mute, solo, and calibrate per track.
 
 Shaders that don't declare these still work — they see the bundle-driven `iChannel0` texture and behave more musically without any code change.
 
@@ -254,7 +306,25 @@ uniform float audio_strength;
 uniform float pulse_speed;
 ```
 
-CedarToy parses these and renders sliders in the Web UI under the shader-parameters section.
+CedarToy parses these (anywhere in the file) and renders sliders in the Web UI under the shader-parameters section. Params missing from `shader_parameters` render at their declared default.
+
+### Modulation matrix
+
+Make any shader musical without rewriting it: a shader only exposes float `@param` knobs, and CedarToy routes musical signals into them. Stage 2 → **Modulation** lists every float `@param` with a base slider, its routes (source, depth, curve, attack/release in **beats**, mode, enable, ✕), **+ route**, and a live meter of the value at the playhead. Routes are saved in the render config as `modulation_routes`, and the preview binds exactly the values the render uses (computed by `cedartoy/modulation.py`).
+
+- **Sources** (0..1, after track mutes/gain/threshold): `iEnergy`, `iEnergyFast`, `iSectionEnergy`, `iBuild`, `iKick`, `iSnare`, `iHat`, `iBass`, `iVocals`, `iDrums`, `iOther`, `iBrightness`, `iBarPhase`, `iPhrasePhase`, `iSectionProgress`, `iBeat`, plus `beat_pulse` / `downbeat_pulse`.
+- **Shaping**: source → envelope follower (attack/release × local beat period) → curve (`linear`, `ease_in`, `ease_out`, `smoothstep`, `pow2`, `sqrt`) → × depth.
+- **`add`**: `param = base + Σ depth·shaped`, clamped to the `@param` min/max. **`integrate`**: adds `depth · ∫shaped dt` (seconds) and is *not* clamped. Use it for phase/offset knobs (rotation angle, scroll offset) so their speed follows the music without jitter.
+
+Shaders can declare default routes next to their params (see `shaders/auroras.glsl`, `shaders/musical_demo.glsl`):
+
+```glsl
+// @param warp_amount float 0.2 0.0 1.0 "Warp"
+// @mod warp_amount <- iKick depth=0.5 release=0.5 curve=ease_out
+// @mod swirl_phase <- iEnergy depth=1.5 mode=integrate
+```
+
+A `modulation_routes` list in the config (even `[]`) replaces the `@mod` defaults; leave the key out to use them. To add knobs to an existing shader, click **Expose knobs ▸** next to *Make this shader reactive ▸*. It copies a Claude prompt that turns the shader's most expressive constants into `@param`s (look unchanged at defaults) and suggests `@mod` routes from the loaded song's data. Paste the reply into the same drawer; **Apply** writes `<shader>_knobs.glsl`.
 
 ---
 

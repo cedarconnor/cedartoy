@@ -40,7 +40,7 @@
                     <div data-stage="shader" hidden>
                         <stage-helper
                             title="Stage 2 · Shader"
-                            subtitle="Pick a shader from the rail. Make this shader reactive ▸ copies a Claude-ready prompt; paste Claude's reply into the drawer below and hit Apply."></stage-helper>
+                            subtitle="Pick a shader from the rail. Make this shader reactive ▸ (or Expose knobs ▸ for the Modulation matrix) copies a Claude-ready prompt; paste Claude's reply into the drawer below and hit Apply."></stage-helper>
                         <config-editor></config-editor>
                         <shader-reactivity-drawer></shader-reactivity-drawer>
                     </div>
@@ -67,6 +67,7 @@
                 <cue-scrubber></cue-scrubber>
                 <track-timeline></track-timeline>
                 <cue-inspector></cue-inspector>
+                <reactivity-scorecard></reactivity-scorecard>
                 <ab-grid></ab-grid>
             </section>
         </main>
@@ -85,6 +86,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/clike/clike.min.js"></script>
 
     <!-- App Scripts -->
-    <script type="module" src="/js/app.js?v=13"></script>
+    <script type="module" src="/js/app.js?v=14"></script>
 </body>
 </html>

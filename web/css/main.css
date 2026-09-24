@@ -192,6 +192,27 @@ body.validate-mode .track-timeline .tt-cal { display: flex; }
     font-size: 9px; color: #778; }
 .track-timeline .tt-cal input[type="range"] { width: 46px; }
 
+/* Reactivity scorecard: Validate mode only. */
+.reactivity-scorecard { display: none; font-family: monospace; font-size: 11px;
+    color: #9ab; padding: 6px 8px; gap: 4px; }
+body.validate-mode .reactivity-scorecard { display: flex; flex-direction: column; }
+.reactivity-scorecard .rs-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.reactivity-scorecard .rs-run { font-size: 11px; padding: 2px 8px; }
+.reactivity-scorecard .rs-status { color: #778; }
+.reactivity-scorecard .rs-legend { margin-left: auto; display: flex; gap: 8px; color: #778; }
+.reactivity-scorecard .rs-key i { display: inline-block; width: 8px; height: 8px;
+    margin-right: 3px; border-radius: 2px; }
+.reactivity-scorecard .rs-summary { margin: 0; padding-left: 16px; color: #cde; }
+.reactivity-scorecard .rs-bars { display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 2px 12px; }
+.reactivity-scorecard .rs-bar { display: flex; align-items: center; gap: 6px; height: 14px; }
+.reactivity-scorecard .rs-name { width: 110px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+.reactivity-scorecard .rs-track { flex: 1; height: 6px; background: #223; border-radius: 3px;
+    overflow: hidden; }
+.reactivity-scorecard .rs-fill { display: block; height: 100%; }
+.reactivity-scorecard .rs-val { width: 30px; text-align: right; color: #cde; }
+
 /* A/B grid: shown only in validate-mode + ab-mode. */
 .ab-grid { display: none; }
 body.validate-mode.ab-mode .ab-grid {

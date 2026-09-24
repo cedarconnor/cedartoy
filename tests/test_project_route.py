@@ -40,6 +40,12 @@ def _seed(folder: Path) -> Path:
     return audio
 
 
+def _load(client, folder: Path) -> None:
+    """Loading a project registers its folder as servable."""
+    resp = client.post("/api/project/load", json={"path": str(folder)})
+    assert resp.status_code == 200, resp.text
+
+
 def test_project_load_returns_project(client, tmp_path):
     folder = tmp_path / "song"
     _seed(folder)
@@ -71,6 +77,7 @@ def test_project_load_resolves_audio_path(client, tmp_path):
 def test_project_bundle_returns_parsed_json(client, tmp_path):
     folder = tmp_path / "song"
     _seed(folder)
+    _load(client, folder)
     bundle_path = folder / "song.musicue.json"
     resp = client.get("/api/project/bundle", params={"path": str(bundle_path)})
     assert resp.status_code == 200
@@ -78,8 +85,11 @@ def test_project_bundle_returns_parsed_json(client, tmp_path):
 
 
 def test_project_bundle_404_when_missing(client, tmp_path):
+    folder = tmp_path / "song"
+    _seed(folder)
+    _load(client, folder)
     resp = client.get("/api/project/bundle",
-                      params={"path": str(tmp_path / "nope.json")})
+                      params={"path": str(folder / "nope.json")})
     assert resp.status_code == 404
 
 
@@ -87,6 +97,7 @@ def test_project_audio_returns_wav_bytes(client, tmp_path):
     """GET /api/project/audio?path=<song.wav> streams the file."""
     folder = tmp_path / "song"
     audio = _seed(folder)
+    _load(client, folder)
     resp = client.get("/api/project/audio", params={"path": str(audio)})
     assert resp.status_code == 200
     assert resp.headers.get("accept-ranges") == "bytes"
@@ -98,6 +109,7 @@ def test_project_audio_supports_range_request(client, tmp_path):
     """Range: bytes=0-99 returns 206 with the first 100 bytes."""
     folder = tmp_path / "song"
     audio = _seed(folder)
+    _load(client, folder)
     resp = client.get(
         "/api/project/audio",
         params={"path": str(audio)},
@@ -108,7 +120,10 @@ def test_project_audio_supports_range_request(client, tmp_path):
 
 
 def test_project_audio_404_when_missing(client, tmp_path):
-    resp = client.get("/api/project/audio", params={"path": str(tmp_path / "nope.wav")})
+    folder = tmp_path / "song"
+    _seed(folder)
+    _load(client, folder)
+    resp = client.get("/api/project/audio", params={"path": str(folder / "nope.wav")})
     assert resp.status_code == 404
 
 
@@ -116,6 +131,7 @@ def test_project_waveform_returns_peaks(client, tmp_path):
     """GET /api/project/waveform?path=<song.wav>&n=64 returns 64 peak floats."""
     folder = tmp_path / "song"
     audio = _seed(folder)
+    _load(client, folder)
     resp = client.get(
         "/api/project/waveform",
         params={"path": str(audio), "n": 64},
@@ -131,9 +147,12 @@ def test_project_waveform_returns_peaks(client, tmp_path):
 
 
 def test_project_waveform_404_when_missing(client, tmp_path):
+    folder = tmp_path / "song"
+    _seed(folder)
+    _load(client, folder)
     resp = client.get(
         "/api/project/waveform",
-        params={"path": str(tmp_path / "nope.wav"), "n": 64},
+        params={"path": str(folder / "nope.wav"), "n": 64},
     )
     assert resp.status_code == 404
 
@@ -166,3 +185,49 @@ def test_project_load_for_send_to_cedartoy_folder(client, tmp_path):
     assert body["manifest"]["grammar"] == "concert_visuals"
     assert body["bundle_sha_matches_audio"] is True
     assert body["warnings"] == []
+
+
+# --- access control -------------------------------------------------------
+
+def test_project_files_403_before_project_loaded(client, tmp_path):
+    folder = tmp_path / "unloaded"
+    audio = _seed(folder)
+    for route, path in (("audio", audio), ("waveform", audio),
+                        ("bundle", folder / "song.musicue.json")):
+        resp = client.get(f"/api/project/{route}", params={"path": str(path)})
+        assert resp.status_code == 403, (route, resp.status_code)
+
+
+def test_project_files_reject_disallowed_extensions(client, tmp_path):
+    folder = tmp_path / "song"
+    _seed(folder)
+    _load(client, folder)
+    secret = folder / "secret.txt"
+    secret.write_text("hunter2")
+    assert client.get("/api/project/audio", params={"path": str(secret)}).status_code == 400
+    assert client.get("/api/project/bundle", params={"path": str(secret)}).status_code == 400
+    assert client.get("/api/project/audio",
+                      params={"path": str(folder / "manifest.json")}).status_code == 400
+
+
+def test_project_files_reject_traversal_out_of_loaded_folder(client, tmp_path):
+    folder = tmp_path / "song"
+    _seed(folder)
+    _load(client, folder)
+    outside = tmp_path / "other"
+    other_audio = _seed(outside)
+    sneaky = folder / ".." / "other" / other_audio.name
+    assert client.get("/api/project/audio", params={"path": str(sneaky)}).status_code == 403
+
+
+def test_add_allowed_root_endpoint_removed(client):
+    resp = client.post("/api/files/add-allowed-root", params={"path": "/"})
+    assert resp.status_code in (404, 405)
+
+
+def test_add_allowed_root_refuses_broad_roots():
+    from cedartoy.server.api.files import add_allowed_root
+    with pytest.raises(ValueError):
+        add_allowed_root(Path("/"))
+    with pytest.raises(ValueError):
+        add_allowed_root(Path.home())

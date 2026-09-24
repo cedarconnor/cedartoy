@@ -27,6 +27,22 @@ uniform int       iBar;
 uniform float     iSectionEnergy;
 uniform int       iSectionId;
 uniform float     iEnergy;
+uniform float     iBeatClock;
+uniform float     iBarPhase;
+uniform float     iPhrasePhase;
+uniform float     iSectionProgress;
+uniform float     iTimeToNextSection;
+uniform float     iBuild;
+uniform float     iKick;
+uniform float     iSnare;
+uniform float     iHat;
+uniform float     iBass;
+uniform float     iVocals;
+uniform float     iDrums;
+uniform float     iOther;
+uniform float     iBrightness;
+uniform float     iEnergyFast;
+uniform float     iMusicTime;
 
 out vec4 fragColor;
 
@@ -47,7 +63,9 @@ EXPECTED_NAMES = {
     "fold_strength_pulse",
     # Camera & UV
     "kick_pulse_camera", "beat_pump_zoom", "camera_rock_subtle",
-    "hat_shimmer",
+    "hat_shimmer", "bar_phase_camera",
+    # Speed, structure & stems
+    "music_time_flow", "build_tension", "stem_layers",
     # Colour & palette
     "section_palette_shift", "section_color_wash",
     "beat_phase_color_dance", "melodic_glow_tint",
@@ -77,7 +95,7 @@ def test_cookbook_extracts_expected_snippets():
 
 def test_cookbook_header_carries_version():
     md = COOKBOOK.read_text(encoding="utf-8")
-    assert "cookbook_version: 2" in md
+    assert "cookbook_version: 3" in md
 
 
 @pytest.fixture(scope="module")
